@@ -142,8 +142,9 @@ export interface ProcessedJob {
 
   /**
    * Whether this job should appear in Atharva's feed.
-   * false if: clearanceRequirement = REQUIRED, or sponsorConfidence = UNKNOWN
-   * (both can be overridden by user preference settings).
+   * false if: clearanceRequirement = REQUIRED (can be overridden by user
+   * preference settings). UNKNOWN sponsor confidence does NOT hide a job —
+   * it means "unverified", not "rejected"; the user filters on the badge.
    */
   feedVisible: boolean
 
@@ -201,14 +202,19 @@ function calculateEligibilityScore(
  * Determine feed visibility.
  * A job is hidden by default if:
  *   - clearance is REQUIRED (cannot apply as non-UK national)
- *   - sponsor confidence is UNKNOWN (employer not on register, no ad claim)
+ *
+ * Sponsor confidence does NOT hide a job here. UNKNOWN means "unverified",
+ * not "rejected" — the employer may simply not be matched yet (the sponsor
+ * DB lookups currently return null, so every job resolves to UNKNOWN). The
+ * UI still surfaces the sponsor badge so the user can filter on it. Only a
+ * confirmed non-sponsor (handled at the filter layer, not here) should be
+ * suppressed when the user opts into sponsor-only filtering.
  */
 function calculateFeedVisible(
   sponsor: SponsorMatchResult['confidence'],
   clearance: ClearanceDetectionResult['requirement'],
 ): boolean {
   if (clearance === 'REQUIRED') return false
-  if (sponsor === 'UNKNOWN') return false
   return true
 }
 
