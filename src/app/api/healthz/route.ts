@@ -1,4 +1,4 @@
-// Health check endpoint for Railway + UptimeRobot monitoring
+// Health check endpoint for container/uptime monitoring
 // Returns 200 OK with pipeline freshness data
 // Returns 503 if any job source is stale (>25h since last fetch)
 import { NextResponse } from 'next/server'

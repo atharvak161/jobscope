@@ -19,7 +19,7 @@
 -- The SponsorRegister table contains ~60,000 rows from the full gov.uk CSV.
 -- Without this GIN index, every ingestion batch runs a full sequential scan of
 -- all 60k rows for EACH job being processed. At 100 jobs per batch that is
--- 6,000,000 row comparisons per batch, triggering Railway Postgres CPU alerts
+-- 6,000,000 row comparisons per batch, spiking Postgres CPU
 -- and causing the sponsor-matcher worker to time out.
 --
 -- With the GIN index, pg_trgm uses the inverted index to narrow candidates

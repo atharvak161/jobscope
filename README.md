@@ -1,47 +1,42 @@
 # JobScope
 
-Personalised job search and application tracker with live sponsorship filtering, SC-clearance detection, and gov.uk sponsor register cross-reference.
+Job aggregator for UK visa-sponsored roles. Filters by sponsorship status, security clearance requirements, and salary. Parses your CV with AI to score role fit.
 
----
+## Quick start
 
-## What it does
+**Requirements:** Docker + Docker Compose, API keys (see below)
 
-- **Multi-source job fetching** — aggregates listings from Adzuna, Reed, and Jooble in a single feed
-- **Sponsorship filtering** — cross-references the live gov.uk Register of Licensed Sponsors to flag which employers can sponsor Skilled Worker visas
-- **SC-clearance detection** — identifies roles requiring Security Clearance and surfaces them with appropriate labels
-- **Application tracker** — tracks every application from saved through to offer, with status history and notes
-- **Resume parsing** — parses uploaded CVs to auto-fill application data and surface keyword gaps against job descriptions
-- **AI-assisted matching** — uses Claude to score job relevance and draft tailored cover letters
+```bash
+git clone https://github.com/atharvak161/jobscope.git
+cd jobscope
+cp .env.example .env
+# Fill in .env with your API keys
+docker-compose up
+```
 
----
+Open http://localhost:3000.
 
-## Tech stack
+## API keys needed
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16 (App Router), React 19 |
-| Language | TypeScript |
-| Styling | Tailwind CSS |
-| Database | PostgreSQL (hosted on Railway) |
-| ORM | Prisma |
-| Auth | NextAuth.js |
-| AI | Anthropic Claude API |
-| Storage | Cloudflare R2 (resume files) |
-| Hosting | Railway |
+| Key | Where to get | Free tier |
+|---|---|---|
+| ADZUNA_APP_ID + ADZUNA_API_KEY | developer.adzuna.com | 250 req/day |
+| REED_API_KEY | reed.co.uk/developers | 1000 req/day |
+| JOOBLE_API_KEY | jooble.org/api | 500 req/day |
+| ANTHROPIC_API_KEY | console.anthropic.com | Pay per use |
 
----
+NEXTAUTH_SECRET: run `openssl rand -base64 32`
 
-## Project status
+Cloudflare R2 (resume storage) is optional — the app works without it, resumes just won't persist between restarts.
 
-This project is under active development. APIs, schema, and UI are subject to change without notice.
+## Database migrations
 
----
+Migrations run automatically on `docker-compose up`. One migration (003 — full-text search index) uses `CREATE INDEX CONCURRENTLY` and must be run manually if you hit an error:
 
-## Getting started
+```bash
+docker-compose exec db psql -U jobscope -d jobscope -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+```
 
-1. Copy `.env.example` to `.env.local` and fill in all required values
-2. `npm install`
-3. `npx prisma migrate dev`
-4. `npm run dev`
+## Architecture
 
-Open [http://localhost:3000](http://localhost:3000) to view the app.
+See `docs/architecture/JOBSCOPE_ARCHITECTURE.md` for full system design, ADRs, and schema.
