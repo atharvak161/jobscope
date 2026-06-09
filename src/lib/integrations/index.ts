@@ -20,6 +20,7 @@ export { RateLimitError, AdapterError } from './types';
 export { fetchAdzunaJobs } from './adzuna';
 export { fetchReedJobs } from './reed';
 export { fetchJoobleJobs } from './jooble';
+export { fetchRemoteOKJobs } from './remoteok';
 
 // gov.uk sponsor register worker
 export {

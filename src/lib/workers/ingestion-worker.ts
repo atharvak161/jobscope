@@ -24,6 +24,7 @@ import {
   fetchAdzunaJobs,
   fetchReedJobs,
   fetchJoobleJobs,
+  fetchRemoteOKJobs,
   computeJobHash,
   type RawJobListing as IntegrationRawJobListing,
 } from '../integrations/index'
@@ -54,10 +55,11 @@ function getClient(): PrismaClient {
 // The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE'> = {
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK'> = {
   adzuna: 'ADZUNA',
   reed: 'REED',
   jooble: 'JOOBLE',
+  remoteok: 'REMOTEOK',
 }
 
 // ---------------------------------------------------------------------------
@@ -276,18 +278,47 @@ export async function runIngestionCycle(
 
   const allListings: IntegrationRawJobListing[] = []
 
-  const adapterRuns: Array<{ name: string; fn: () => Promise<IntegrationRawJobListing[]> }> = [
-    { name: 'adzuna', fn: () => fetchAdzunaJobs(query, location, 1) },
-    { name: 'reed', fn: () => fetchReedJobs(query, location) },
-    { name: 'jooble', fn: () => fetchJoobleJobs(query, location) },
+  // Keyed adapters only run when their required env vars are configured.
+  // A missing key is not an error — the source is simply skipped so the app
+  // works out of the box with zero API keys.
+  const adapterRuns: Array<{
+    name: string
+    enabled: boolean
+    fn: () => Promise<IntegrationRawJobListing[]>
+  }> = [
+    {
+      name: 'adzuna',
+      enabled: Boolean(process.env.ADZUNA_APP_ID && process.env.ADZUNA_API_KEY),
+      fn: () => fetchAdzunaJobs(query, location, 1),
+    },
+    {
+      name: 'reed',
+      enabled: Boolean(process.env.REED_API_KEY),
+      fn: () => fetchReedJobs(query, location),
+    },
+    {
+      name: 'jooble',
+      enabled: Boolean(process.env.JOOBLE_API_KEY),
+      fn: () => fetchJoobleJobs(query, location),
+    },
+    // RemoteOK requires no key — always enabled.
+    {
+      name: 'remoteok',
+      enabled: true,
+      fn: () => fetchRemoteOKJobs(50),
+    },
   ]
 
   for (const adapter of adapterRuns) {
+    if (!adapter.enabled) {
+      console.log(`[ingestion-worker] ${adapter.name}: no API keys configured, skipping`)
+      continue
+    }
     try {
       const listings = await adapter.fn()
       allListings.push(...listings)
     } catch (err) {
-      console.error(`[ingestion-worker] ${adapter.name} adapter failed:`, err)
+      console.warn(`[ingestion-worker] ${adapter.name} adapter failed:`, err)
       errors++
     }
   }
