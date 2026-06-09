@@ -1,13 +1,13 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, MapPin, Calendar, Briefcase, DollarSign } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SponsorBadge } from "@/components/SponsorBadge";
 import { ClearanceBadge } from "@/components/ClearanceBadge";
 import type { Job } from "@/lib/types";
 import { MOCK_JOBS } from "@/lib/mock/jobs";
+import { JobActions } from "./JobActions";
 
 // ─── Data fetching ────────────────────────────────────────────────────────────
 
@@ -174,20 +174,7 @@ export default async function JobDetailPage({
             <Separator />
 
             {/* CTAs */}
-            <div className="flex items-center gap-3">
-              <ApplyButton job={job} />
-              <SaveButton job={job} />
-              {job.sourceUrl && (
-                <a
-                  href={job.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
-                >
-                  View original <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                </a>
-              )}
-            </div>
+            <JobActions jobId={job.id} jobTitle={job.title} sourceUrl={job.sourceUrl} />
           </div>
 
           {/* Job description */}
@@ -229,76 +216,5 @@ export default async function JobDetailPage({
         </aside>
       </div>
     </div>
-  );
-}
-
-// ─── Client CTA buttons ───────────────────────────────────────────────────────
-// These need "use client" — extracted as separate components
-
-function ApplyButton({ job }: { job: Job }) {
-  "use client";
-  const [applying, setApplying] = React.useState(false);
-  const [done, setDone] = React.useState(false);
-
-  async function handleApply() {
-    setApplying(true);
-    try {
-      await fetch("/api/applications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id, status: "APPLIED" }),
-      });
-      setDone(true);
-    } catch {
-      // offline/mock mode
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  return (
-    <Button
-      size="sm"
-      className="bg-blue-600 hover:bg-blue-700 text-white"
-      onClick={handleApply}
-      disabled={applying || done}
-      aria-label={`Apply to ${job.title}`}
-    >
-      {done ? "Applied ✓" : applying ? "Applying…" : "Apply Now"}
-    </Button>
-  );
-}
-
-function SaveButton({ job }: { job: Job }) {
-  "use client";
-  const [saving, setSaving] = React.useState(false);
-  const [done, setDone] = React.useState(false);
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      await fetch("/api/applications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id, status: "SAVED" }),
-      });
-      setDone(true);
-    } catch {
-      // offline/mock mode
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleSave}
-      disabled={saving || done}
-      aria-label={`Save ${job.title} for later`}
-    >
-      {done ? "Saved ✓" : saving ? "Saving…" : "Save for later"}
-    </Button>
   );
 }
