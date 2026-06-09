@@ -37,7 +37,8 @@ CREATE TYPE "JobSource" AS ENUM (
   'REED',
   'JOOBLE',
   'RSS_JSONLD',
-  'GOV_UK'
+  'GOV_UK',
+  'REMOTEOK'
 );
 
 CREATE TYPE "ClearanceStatus" AS ENUM (
