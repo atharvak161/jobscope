@@ -1,0 +1,347 @@
+/**
+ * Ingestion Worker
+ *
+ * Connects the job-source adapters to the database:
+ *
+ *   1. Calls the job-source adapters (Adzuna, Reed, Jooble)
+ *   2. Computes a stable content hash via dedup.ts
+ *   3. Writes to RawJobIngestion (upsert on contentHash — skip duplicates)
+ *   4. Calls process-job.ts to run the matching + eligibility pipeline
+ *   5. Writes processed results to the Job table (upsert on source + sourceId)
+ *   6. Updates JobSponsorMatch when a sponsor was matched
+ *
+ * DB errors are caught and counted — a failed DB write increments the error
+ * counter but does not abort the rest of the batch. Network errors from
+ * individual adapters are logged and counted; the other adapters still run.
+ *
+ * Usage:
+ *   const result = await runIngestionCycle('cybersecurity', 'london')
+ *   // → { ingested: 47, skipped: 12, errors: 1 }
+ */
+
+import { PrismaClient } from '../../generated/prisma/client'
+import {
+  fetchAdzunaJobs,
+  fetchReedJobs,
+  fetchJoobleJobs,
+  computeJobHash,
+  type RawJobListing as IntegrationRawJobListing,
+} from '../integrations/index'
+import {
+  processRawJob,
+  type RawJobListing as PipelineRawJobListing,
+  type ProcessedJob,
+} from '../pipeline/process-job'
+
+// ---------------------------------------------------------------------------
+// Module-level Prisma client
+// Lazy: the client is created once and reused across calls in the same
+// process. If the DB is unreachable, individual queries throw and are caught.
+// ---------------------------------------------------------------------------
+
+let prisma: PrismaClient | null = null
+
+function getClient(): PrismaClient {
+  if (!prisma) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prisma = new PrismaClient({} as any)
+  }
+  return prisma
+}
+
+// ---------------------------------------------------------------------------
+// Source-to-enum mapping
+// The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
+// ---------------------------------------------------------------------------
+
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE'> = {
+  adzuna: 'ADZUNA',
+  reed: 'REED',
+  jooble: 'JOOBLE',
+}
+
+// ---------------------------------------------------------------------------
+// Adapter bridging
+// Converts the integration layer's RawJobListing to the pipeline's RawJobListing.
+// The two types diverge on: company/companyName, url/listingUrl, postedAt type,
+// optional vs nullable salaries, and the contentHash field (added here).
+// ---------------------------------------------------------------------------
+
+function bridgeToPipelineInput(
+  job: IntegrationRawJobListing,
+  hash: string,
+): PipelineRawJobListing {
+  return {
+    externalId: job.externalId,
+    source: job.source,
+    title: job.title,
+    companyName: job.company,
+    description: job.description,
+    location: job.location,
+    salaryMin: job.salaryMin ?? null,
+    salaryMax: job.salaryMax ?? null,
+    postedAt: job.postedAt instanceof Date ? job.postedAt.toISOString() : String(job.postedAt),
+    listingUrl: job.url,
+    contentHash: hash,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// writeRawJob
+// Upsert a raw job listing into RawJobIngestion.
+// ON CONFLICT on contentHash → update rawJson and leave processedJobId intact.
+// Returns true if the row was newly inserted (not a duplicate), false otherwise.
+// ---------------------------------------------------------------------------
+
+export async function writeRawJob(
+  raw: IntegrationRawJobListing,
+  hash: string,
+): Promise<{ wasNew: boolean }> {
+  const db = getClient()
+  const sourceEnum = SOURCE_MAP[raw.source.toLowerCase()]
+
+  if (!sourceEnum) {
+    throw new Error(`Unknown source "${raw.source}" — cannot map to JobSource enum.`)
+  }
+
+  // Check for existing row first (Prisma 7 upsert requires a unique field in `where`)
+  const existing = await db.rawJobIngestion.findUnique({
+    where: { contentHash: hash },
+    select: { id: true },
+  })
+
+  if (existing) {
+    return { wasNew: false }
+  }
+
+  await db.rawJobIngestion.create({
+    data: {
+      source: sourceEnum,
+      contentHash: hash,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      rawJson: raw as any,
+    },
+  })
+
+  return { wasNew: true }
+}
+
+// ---------------------------------------------------------------------------
+// writeProcessedJob
+// Upsert the enriched job record into Job and create/update JobSponsorMatch.
+// ---------------------------------------------------------------------------
+
+export async function writeProcessedJob(
+  processed: ProcessedJob,
+  hash: string,
+): Promise<void> {
+  const db = getClient()
+  const sourceEnum = SOURCE_MAP[processed.source.toLowerCase()]
+
+  if (!sourceEnum) {
+    throw new Error(`Unknown source "${processed.source}" — cannot map to JobSource enum.`)
+  }
+
+  // Map seniority from pipeline output to Prisma enum
+  // Pipeline returns JUNIOR | MID | SENIOR | UNKNOWN; schema has JUNIOR | MID | SENIOR
+  const seniorityEnum: 'JUNIOR' | 'MID' | 'SENIOR' | null =
+    processed.seniority === 'UNKNOWN' ? null : processed.seniority
+
+  // Map clearance from pipeline output to Prisma enum
+  const clearanceEnum: 'REQUIRED' | 'PREFERRED' | 'NONE_DETECTED' =
+    processed.clearanceRequirement === 'REQUIRED'
+      ? 'REQUIRED'
+      : processed.clearanceRequirement === 'PREFERRED'
+        ? 'PREFERRED'
+        : 'NONE_DETECTED'
+
+  // Find existing job by source + sourceId to determine upsert key
+  const existingJob = await db.job.findFirst({
+    where: { source: sourceEnum, sourceId: processed.externalId },
+    select: { id: true },
+  })
+
+  let jobId: string
+
+  if (existingJob) {
+    // Update the existing record
+    await db.job.update({
+      where: { id: existingJob.id },
+      data: {
+        title: processed.title,
+        employer: processed.companyName,
+        employerNormalised: processed.companyNameNormalised,
+        description: processed.description,
+        location: processed.location,
+        salaryMinGbp: processed.salaryMin,
+        salaryMaxGbp: processed.salaryMax,
+        postedAt: new Date(processed.postedAt),
+        clearanceStatus: clearanceEnum,
+        seniority: seniorityEnum ?? undefined,
+        subDomain: processed.subDomains.length > 0 ? processed.subDomains[0] : null,
+        feedVisible: processed.feedVisible,
+        isActive: true,
+      },
+    })
+    jobId = existingJob.id
+  } else {
+    // Create new job record
+    const newJob = await db.job.create({
+      data: {
+        source: sourceEnum,
+        sourceId: processed.externalId,
+        sourceUrl: processed.listingUrl,
+        title: processed.title,
+        employer: processed.companyName,
+        employerNormalised: processed.companyNameNormalised,
+        description: processed.description,
+        location: processed.location,
+        salaryMinGbp: processed.salaryMin,
+        salaryMaxGbp: processed.salaryMax,
+        postedAt: new Date(processed.postedAt),
+        clearanceStatus: clearanceEnum,
+        seniority: seniorityEnum ?? undefined,
+        subDomain: processed.subDomains.length > 0 ? processed.subDomains[0] : null,
+        feedVisible: processed.feedVisible,
+        isActive: true,
+      },
+    })
+    jobId = newJob.id
+
+    // Link processedJobId back to RawJobIngestion
+    try {
+      await db.rawJobIngestion.updateMany({
+        where: { contentHash: hash },
+        data: { processedJobId: jobId },
+      })
+    } catch {
+      // Non-fatal: raw record may already be gone or processedJobId already set
+    }
+  }
+
+  // Write sponsor match if the pipeline found one
+  if (processed.matchedSponsorId && processed.sponsorConfidence !== 'UNKNOWN') {
+    const confidenceEnum: 'CONFIRMED' | 'LIKELY' | 'LOW_CONFIDENCE' | 'UNKNOWN' =
+      processed.sponsorConfidence === 'CONFIRMED'
+        ? 'CONFIRMED'
+        : processed.sponsorConfidence === 'LIKELY'
+          ? 'LIKELY'
+          : 'UNKNOWN'
+
+    // Upsert by unique composite key (jobId, sponsorId)
+    const existingMatch = await db.jobSponsorMatch.findUnique({
+      where: {
+        jobId_sponsorId: { jobId, sponsorId: processed.matchedSponsorId },
+      },
+      select: { id: true },
+    })
+
+    if (existingMatch) {
+      await db.jobSponsorMatch.update({
+        where: { id: existingMatch.id },
+        data: {
+          confidenceTier: confidenceEnum,
+          matchReason: processed.sponsorMatchReason,
+        },
+      })
+    } else {
+      await db.jobSponsorMatch.create({
+        data: {
+          jobId,
+          sponsorId: processed.matchedSponsorId,
+          confidenceTier: confidenceEnum,
+          matchReason: processed.sponsorMatchReason,
+          similarityScore: null,
+        },
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// runIngestionCycle
+// Top-level entry point: calls all three adapters and processes every listing.
+// ---------------------------------------------------------------------------
+
+export async function runIngestionCycle(
+  query: string,
+  location: string,
+): Promise<{ ingested: number; skipped: number; errors: number }> {
+  let ingested = 0
+  let skipped = 0
+  let errors = 0
+
+  // ── 1. Collect listings from all three adapters ───────────────────────────
+  // Adapter failures are isolated: one failing source doesn't block the others.
+
+  const allListings: IntegrationRawJobListing[] = []
+
+  const adapterRuns: Array<{ name: string; fn: () => Promise<IntegrationRawJobListing[]> }> = [
+    { name: 'adzuna', fn: () => fetchAdzunaJobs(query, location, 1) },
+    { name: 'reed', fn: () => fetchReedJobs(query, location) },
+    { name: 'jooble', fn: () => fetchJoobleJobs(query, location) },
+  ]
+
+  for (const adapter of adapterRuns) {
+    try {
+      const listings = await adapter.fn()
+      allListings.push(...listings)
+    } catch (err) {
+      console.error(`[ingestion-worker] ${adapter.name} adapter failed:`, err)
+      errors++
+    }
+  }
+
+  // ── 2. Process each listing ────────────────────────────────────────────────
+
+  for (const rawListing of allListings) {
+    try {
+      // Compute dedup hash
+      const hash = computeJobHash(rawListing)
+
+      // Write to RawJobIngestion (skip if duplicate)
+      let wasNew = false
+      try {
+        const result = await writeRawJob(rawListing, hash)
+        wasNew = result.wasNew
+      } catch (err) {
+        console.error('[ingestion-worker] writeRawJob failed:', err)
+        errors++
+        continue
+      }
+
+      if (!wasNew) {
+        skipped++
+        continue
+      }
+
+      // Run the enrichment pipeline
+      const pipelineInput = bridgeToPipelineInput(rawListing, hash)
+      let processed: ProcessedJob
+      try {
+        processed = await processRawJob(pipelineInput)
+      } catch (err) {
+        console.error('[ingestion-worker] processRawJob failed:', err)
+        errors++
+        continue
+      }
+
+      // Write to Job + JobSponsorMatch
+      try {
+        await writeProcessedJob(processed, hash)
+      } catch (err) {
+        console.error('[ingestion-worker] writeProcessedJob failed:', err)
+        errors++
+        continue
+      }
+
+      ingested++
+    } catch (err) {
+      // Catch-all for unexpected errors on a single listing
+      console.error('[ingestion-worker] unexpected error processing listing:', err)
+      errors++
+    }
+  }
+
+  return { ingested, skipped, errors }
+}

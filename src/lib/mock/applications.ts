@@ -1,0 +1,101 @@
+import type { Application, ApplicationsApiResponse } from "@/lib/types";
+import { MOCK_JOBS } from "./jobs";
+
+export const MOCK_APPLICATIONS: Application[] = [
+  {
+    id: "mock-app-1",
+    jobId: "mock-job-1",
+    status: "INTERVIEWING",
+    sponsorConfidenceAtApply: "CONFIRMED",
+    clearanceStatusAtApply: "NONE_DETECTED",
+    appliedAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    recruiterName: "Sarah Mitchell",
+    recruiterEmail: "s.mitchell@cloudflare.com",
+    notes:
+      "First technical interview went well. Waiting on second round with the security team lead. They confirmed sponsorship during the call.",
+    createdAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    job: {
+      id: "mock-job-1",
+      title: MOCK_JOBS[0].title,
+      employer: MOCK_JOBS[0].employer,
+      salary: MOCK_JOBS[0].salary,
+      salaryMinGbp: MOCK_JOBS[0].salaryMinGbp,
+      salaryMaxGbp: MOCK_JOBS[0].salaryMaxGbp,
+      location: MOCK_JOBS[0].location,
+      locationNormalised: MOCK_JOBS[0].locationNormalised,
+      sponsorConfidence: MOCK_JOBS[0].sponsorConfidence,
+      clearanceStatus: MOCK_JOBS[0].clearanceStatus,
+      seniority: MOCK_JOBS[0].seniority,
+      subDomain: MOCK_JOBS[0].subDomain,
+      sourceUrl: MOCK_JOBS[0].sourceUrl,
+      postedAt: MOCK_JOBS[0].postedAt,
+    },
+  },
+  {
+    id: "mock-app-2",
+    jobId: "mock-job-2",
+    status: "APPLIED",
+    sponsorConfidenceAtApply: "LIKELY",
+    clearanceStatusAtApply: "NONE_DETECTED",
+    appliedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    notes: "Applied via their careers portal. Referenced SIEM experience with Splunk.",
+    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    job: {
+      id: "mock-job-2",
+      title: MOCK_JOBS[1].title,
+      employer: MOCK_JOBS[1].employer,
+      salary: MOCK_JOBS[1].salary,
+      salaryMinGbp: MOCK_JOBS[1].salaryMinGbp,
+      salaryMaxGbp: MOCK_JOBS[1].salaryMaxGbp,
+      location: MOCK_JOBS[1].location,
+      locationNormalised: MOCK_JOBS[1].locationNormalised,
+      sponsorConfidence: MOCK_JOBS[1].sponsorConfidence,
+      clearanceStatus: MOCK_JOBS[1].clearanceStatus,
+      seniority: MOCK_JOBS[1].seniority,
+      subDomain: MOCK_JOBS[1].subDomain,
+      sourceUrl: MOCK_JOBS[1].sourceUrl,
+      postedAt: MOCK_JOBS[1].postedAt,
+    },
+  },
+  {
+    id: "mock-app-3",
+    jobId: "mock-job-3",
+    status: "GHOSTED",
+    sponsorConfidenceAtApply: "LIKELY",
+    clearanceStatusAtApply: "PREFERRED",
+    appliedAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
+    ghostingFlaggedAt: new Date(
+      Date.now() - 14 * 24 * 60 * 60 * 1000
+    ).toISOString(),
+    notes: "No response after 35 days. Auto-flagged as ghosted.",
+    createdAt: new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString(),
+    updatedAt: new Date(
+      Date.now() - 14 * 24 * 60 * 60 * 1000
+    ).toISOString(),
+    job: {
+      id: "mock-job-3",
+      title: MOCK_JOBS[2].title,
+      employer: MOCK_JOBS[2].employer,
+      salary: MOCK_JOBS[2].salary,
+      salaryMinGbp: MOCK_JOBS[2].salaryMinGbp,
+      salaryMaxGbp: MOCK_JOBS[2].salaryMaxGbp,
+      location: MOCK_JOBS[2].location,
+      locationNormalised: MOCK_JOBS[2].locationNormalised,
+      sponsorConfidence: MOCK_JOBS[2].sponsorConfidence,
+      clearanceStatus: MOCK_JOBS[2].clearanceStatus,
+      seniority: MOCK_JOBS[2].seniority,
+      subDomain: MOCK_JOBS[2].subDomain,
+      sourceUrl: MOCK_JOBS[2].sourceUrl,
+      postedAt: MOCK_JOBS[2].postedAt,
+    },
+  },
+];
+
+export const MOCK_APPLICATIONS_RESPONSE: ApplicationsApiResponse = {
+  applications: MOCK_APPLICATIONS,
+  total: MOCK_APPLICATIONS.length,
+  page: 1,
+  limit: 20,
+};

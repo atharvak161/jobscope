@@ -1,0 +1,345 @@
+// JobScope — Prisma Schema
+// DB Engineer: implemented 2026-06-08
+// Source spec: docs/projects/job-tracker/SCHEMA_DRAFT.md
+// Architecture: docs/architecture/JOBSCOPE_ARCHITECTURE.md
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ParseStatus {
+  PENDING
+  PROCESSING
+  PENDING_REVIEW
+  ACTIVE
+  FAILED
+}
+
+enum Seniority {
+  JUNIOR
+  MID
+  SENIOR
+}
+
+enum JobSource {
+  ADZUNA
+  REED
+  JOOBLE
+  RSS_JSONLD
+  GOV_UK
+}
+
+enum ClearanceStatus {
+  REQUIRED
+  PREFERRED
+  NONE_DETECTED
+}
+
+enum LocationType {
+  LONDON
+  REMOTE
+  HYBRID
+  UK_OTHER
+  UNKNOWN
+}
+
+enum ApplicationStatus {
+  SAVED
+  APPLIED
+  APPLICATION_ACKNOWLEDGED
+  INTERVIEW_SCHEDULED
+  INTERVIEWING
+  OFFER
+  ACCEPTED
+  REJECTED
+  GHOSTED
+  WITHDRAWN
+}
+
+enum SponsorConfidence {
+  CONFIRMED
+  LIKELY
+  LOW_CONFIDENCE
+  UNKNOWN
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEXTAUTH MODELS
+// Standard NextAuth v5 Prisma adapter models — do not modify
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER
+// Standard NextAuth User model extended with JobScope relations
+// UUIDs throughout — not sequential integers (IDOR prevention per ADR)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // NextAuth
+  accounts Account[]
+  sessions Session[]
+
+  // JobScope
+  profile      UserProfile?
+  applications Application[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// USER PROFILE
+// Parsed resume data — written by resume-parser worker, confirmed by user
+// resumeStorageKey is an R2 object key — never a URL; signed URLs on demand
+// ─────────────────────────────────────────────────────────────────────────────
+
+model UserProfile {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Resume storage
+  resumeStorageKey String?   // R2 object key: {userId}/{uuid}/{filename}
+  resumeUploadedAt DateTime?
+  parseStatus      ParseStatus @default(PENDING)
+
+  // Parsed data (written by resume-parser worker, confirmed by user)
+  skills            String[] // ["penetration testing", "OSCP", "Python", ...]
+  certifications    String[] // ["CEH", "eJPT", "CompTIA Security+", ...]
+  subDomains        String[] // ["Penetration Testing", "GRC", "SOC", ...]
+  experienceYears   Int?
+  seniorityInferred Seniority?
+  rolesJson         Json? // [{title, employer, start, end}] — too variable for typed columns
+  educationJson     Json? // [{degree, institution, year}]
+
+  // Filter defaults (loaded from parsed profile, editable by user)
+  salaryMin      Int? // Annual GBP
+  salaryMax      Int?
+  locationPrefs  String[] // ["London", "Remote", "Hybrid"]
+  seniorityPrefs Seniority[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOB
+// Centralised normalised job record — one row per unique job listing
+// contentHash dedup happens upstream in RawJobIngestion
+// feedVisible + isActive composite index covers the primary feed query
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Job {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Source tracking
+  source    JobSource
+  sourceId  String? // source's own job ID
+  sourceUrl String? // original job listing URL
+
+  // Core fields
+  title              String
+  employer           String // raw employer name from source
+  employerNormalised String // after legal-suffix stripping + lowercase
+  description        String    @db.Text
+  salary             String? // raw salary string from source
+  salaryMinGbp       Int? // normalised to annual GBP
+  salaryMaxGbp       Int?
+  location           String? // raw location string
+  locationNormalised LocationType @default(UNKNOWN)
+  postedAt           DateTime? // when the job was posted (from source)
+  closedAt           DateTime? // soft-closed when no longer in source
+
+  // Eligibility enrichment
+  clearanceStatus ClearanceStatus @default(NONE_DETECTED)
+  seniority       Seniority?
+  subDomain       String? // classified cybersecurity sub-domain
+
+  // Feed control
+  feedVisible Boolean @default(true)
+  isActive    Boolean @default(true) // false when stale-closed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  sponsorMatches JobSponsorMatch[]
+  applications   Application[]
+
+  @@index([employer])
+  @@index([employerNormalised])
+  @@index([postedAt])
+  @@index([clearanceStatus])
+  @@index([feedVisible, isActive, postedAt(sort: Desc)]) // primary feed query index
+  @@index([salaryMinGbp, salaryMaxGbp])
+  @@index([source, sourceId]) // dedup reference lookup
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APPLICATION
+// Per-user, per-job application lifecycle tracker
+// sponsorConfidenceAtApply / clearanceStatusAtApply are snapshots at
+// application time — register changes must not mutate historical records
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Application {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId  String @db.Uuid
+  job    Job    @relation(fields: [jobId], references: [id])
+
+  status ApplicationStatus @default(SAVED)
+
+  // Snapshot at time of application (values may change on the job record later)
+  sponsorConfidenceAtApply SponsorConfidence?
+  clearanceStatusAtApply   ClearanceStatus?
+  salaryOffered            Int? // Annual GBP, if known
+
+  // Tracking fields
+  appliedAt         DateTime?
+  recruiterName     String?
+  recruiterEmail    String?
+  recruiterAgency   String?
+  notes             String?   @db.Text
+  ghostingFlaggedAt DateTime? // set when >21 days at Applied with no update
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId]) // one application record per user per job
+  @@index([userId, status])
+  @@index([userId, appliedAt])
+  @@index([status, appliedAt]) // ghosting detector query
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPONSOR REGISTER
+// gov.uk Register of Licensed Sponsors — one row per licensed company
+// nameNormalised carries a pg_trgm GIN index added in 003_trgm_index.sql
+// That index CANNOT be expressed in Prisma schema — it must be raw SQL
+// Without it the sponsor-matcher runs a full seq scan of ~60k rows per batch
+// ─────────────────────────────────────────────────────────────────────────────
+
+model SponsorRegister {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  // Raw fields from gov.uk CSV
+  name      String // as appears on the register
+  townCity  String?
+  county    String?
+  typeRating String? // e.g. "Worker", "Temporary Worker"
+  route     String[] // Skilled Worker, Intra-company Transfer, etc.
+
+  // Normalised for matching
+  nameNormalised String // lowercase, no legal suffixes, no punctuation
+
+  // Register metadata
+  active      Boolean   @default(true) // false if removed from latest CSV
+  lastSeenAt  DateTime // last time this row appeared in CSV
+  suspendedAt DateTime? // if suspended by Home Office
+  lastUpdated DateTime  @updatedAt
+
+  // Relations
+  jobMatches JobSponsorMatch[]
+
+  @@index([nameNormalised])
+  // NOTE: pg_trgm GIN index on nameNormalised is in 003_trgm_index.sql
+  // CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sponsor_name_normalised_trgm
+  //   ON "SponsorRegister" USING GIN ("nameNormalised" gin_trgm_ops);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOB SPONSOR MATCH
+// Records sponsor-matching decisions — one row per job-sponsor pair
+// confidenceTier drives the feed filter and application snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+
+model JobSponsorMatch {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  jobId     String          @db.Uuid
+  job       Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sponsorId String          @db.Uuid
+  sponsor   SponsorRegister @relation(fields: [sponsorId], references: [id])
+
+  confidenceTier  SponsorConfidence
+  matchReason     String // e.g. "exact_match", "trgm_0.92", "jd_explicit"
+  similarityScore Float? // pg_trgm similarity score if applicable
+
+  createdAt DateTime @default(now())
+
+  @@unique([jobId, sponsorId]) // one match record per job-sponsor pair
+  @@index([jobId, confidenceTier])
+  @@index([sponsorId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAW JOB INGESTION
+// Pre-normalisation staging table — content-hash dedup enforced at DB level
+// contentHash = SHA-256(title + employer + location + description[:200])
+// INSERT ... ON CONFLICT (contentHash) DO NOTHING — no app-layer dedup needed
+// processedJobId is null until normalisation worker creates the Job record
+// ─────────────────────────────────────────────────────────────────────────────
+
+model RawJobIngestion {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source      JobSource
+  contentHash String    @unique // SHA-256 dedup key
+  rawJson     Json // full raw API response payload
+  processedJobId String? @db.Uuid // populated once normalised to jobs table
+  ingestedAt  DateTime  @default(now())
+
+  @@index([source, ingestedAt])
+  @@index([contentHash]) // unique constraint implies index; explicit for clarity
+}
