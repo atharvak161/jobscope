@@ -34,6 +34,7 @@ enum JobSource {
   ADZUNA
   REED
   JOOBLE
+  REMOTEOK
   RSS_JSONLD
   GOV_UK
 }
