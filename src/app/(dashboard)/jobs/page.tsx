@@ -1,0 +1,445 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
+import { SponsorBadge } from "@/components/SponsorBadge";
+import { ClearanceBadge } from "@/components/ClearanceBadge";
+import type { Job, JobsApiResponse, SponsorConfidence, LocationType, Seniority } from "@/lib/types";
+import { MOCK_JOBS_RESPONSE } from "@/lib/mock/jobs";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type LocationFilter = "ALL" | LocationType;
+type SeniorityFilter = "ALL" | Seniority;
+type DomainFilter = "ALL" | string;
+type SponsorFilter = "ALL" | SponsorConfidence;
+
+interface Filters {
+  location: LocationFilter;
+  seniority: SeniorityFilter;
+  domain: DomainFilter;
+  sponsorship: SponsorFilter;
+  excludeSC: boolean;
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 10;
+
+const LOCATION_OPTIONS: { label: string; value: LocationFilter }[] = [
+  { label: "All", value: "ALL" },
+  { label: "London", value: "LONDON" },
+  { label: "Remote", value: "REMOTE" },
+  { label: "Hybrid", value: "HYBRID" },
+];
+
+const SENIORITY_OPTIONS: { label: string; value: SeniorityFilter }[] = [
+  { label: "All", value: "ALL" },
+  { label: "Junior", value: "JUNIOR" },
+  { label: "Mid", value: "MID" },
+  { label: "Senior", value: "SENIOR" },
+];
+
+const DOMAIN_OPTIONS: { label: string; value: DomainFilter }[] = [
+  { label: "All", value: "ALL" },
+  { label: "SOC", value: "SOC" },
+  { label: "Pentest", value: "Penetration Testing" },
+  { label: "GRC", value: "GRC" },
+  { label: "AppSec", value: "AppSec" },
+  { label: "Cloud", value: "Cloud" },
+];
+
+const SPONSOR_OPTIONS: { label: string; value: SponsorFilter }[] = [
+  { label: "All", value: "ALL" },
+  { label: "Confirmed", value: "CONFIRMED" },
+  { label: "Likely", value: "LIKELY" },
+];
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+function formatDaysAgo(dateStr?: string): string {
+  if (!dateStr) return "recently";
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  return `${days}d ago`;
+}
+
+function formatSalary(job: Job): string {
+  if (job.salary) return job.salary;
+  if (job.salaryMinGbp && job.salaryMaxGbp) {
+    return `£${(job.salaryMinGbp / 1000).toFixed(0)}k–£${(job.salaryMaxGbp / 1000).toFixed(0)}k`;
+  }
+  return "Salary not specified";
+}
+
+async function fetchJobs(filters: Filters, page: number): Promise<JobsApiResponse> {
+  const params = new URLSearchParams();
+  if (filters.location !== "ALL") params.set("location", filters.location);
+  if (filters.seniority !== "ALL") params.set("seniority", filters.seniority);
+  if (filters.domain !== "ALL") params.set("sub_domain", filters.domain);
+  if (filters.sponsorship !== "ALL") params.set("sponsor_confidence", filters.sponsorship);
+  if (filters.excludeSC) params.set("excludeSC", "true");
+  params.set("page", String(page));
+  params.set("limit", String(PAGE_SIZE));
+
+  const res = await fetch(`/api/jobs?${params.toString()}`);
+  if (!res.ok) throw new Error("API unavailable");
+  return res.json() as Promise<JobsApiResponse>;
+}
+
+function postApplication(jobId: string, status: "SAVED" | "APPLIED") {
+  return fetch("/api/applications", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jobId, status }),
+  });
+}
+
+// ─── Filter chip group ────────────────────────────────────────────────────────
+
+function FilterChipGroup<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group">
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+            value === opt.value
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          }`}
+          aria-pressed={value === opt.value}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Job card ─────────────────────────────────────────────────────────────────
+
+function JobCard({ job }: { job: Job }) {
+  const [saving, setSaving] = React.useState(false);
+  const [applying, setApplying] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const [applied, setApplied] = React.useState(false);
+
+  async function handleSave(e: React.MouseEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await postApplication(job.id, "SAVED");
+      setSaved(true);
+    } catch {
+      // silently fail — offline/mock mode
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleApply(e: React.MouseEvent) {
+    e.preventDefault();
+    setApplying(true);
+    try {
+      await postApplication(job.id, "APPLIED");
+      setApplied(true);
+    } catch {
+      // silently fail — offline/mock mode
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-4 flex flex-col gap-3 hover:border-slate-300 transition-colors">
+      {/* Header */}
+      <div>
+        <Link
+          href={`/jobs/${job.id}`}
+          className="text-sm font-semibold text-slate-900 hover:text-blue-700 transition-colors leading-snug block"
+        >
+          {job.title}
+        </Link>
+        <p className="mt-0.5 text-xs text-slate-500">{job.employer}</p>
+      </div>
+
+      {/* Badges */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SponsorBadge
+          confidence={job.sponsorConfidence}
+          matchReason={job.sponsorMatchReason}
+        />
+        {job.clearanceStatus !== "NONE_DETECTED" && (
+          <ClearanceBadge status={job.clearanceStatus} />
+        )}
+      </div>
+
+      {/* Salary */}
+      <p className="text-xs font-medium text-slate-700">{formatSalary(job)}</p>
+
+      {/* Meta */}
+      <p className="text-xs text-slate-400">
+        {job.location}
+        {job.seniority && ` · ${job.seniority.charAt(0) + job.seniority.slice(1).toLowerCase()}`}
+        {` · ${formatDaysAgo(job.postedAt)}`}
+      </p>
+
+      {/* Actions */}
+      <div className="flex gap-2 mt-auto">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1 text-xs"
+          onClick={handleSave}
+          disabled={saving || saved}
+          aria-label={`Save ${job.title} at ${job.employer}`}
+        >
+          {saved ? "Saved ✓" : saving ? "Saving…" : "Save"}
+        </Button>
+        <Button
+          size="sm"
+          className="flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+          onClick={handleApply}
+          disabled={applying || applied}
+          aria-label={`Apply to ${job.title} at ${job.employer}`}
+        >
+          {applied ? "Applied ✓" : applying ? "Applying…" : "Apply"}
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+// ─── Skeleton card ────────────────────────────────────────────────────────────
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 flex flex-col gap-3">
+      <div>
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="mt-1 h-3 w-1/2" />
+      </div>
+      <div className="flex gap-2">
+        <Skeleton className="h-5 w-20 rounded-full" />
+        <Skeleton className="h-5 w-20 rounded-full" />
+      </div>
+      <Skeleton className="h-3 w-1/3" />
+      <Skeleton className="h-3 w-2/3" />
+      <div className="flex gap-2">
+        <Skeleton className="h-8 flex-1" />
+        <Skeleton className="h-8 flex-1" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function JobsPage() {
+  const [filters, setFilters] = React.useState<Filters>({
+    location: "ALL",
+    seniority: "ALL",
+    domain: "ALL",
+    sponsorship: "ALL",
+    excludeSC: true,
+  });
+  const [page, setPage] = React.useState(1);
+  const [jobs, setJobs] = React.useState<Job[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [totalPages, setTotalPages] = React.useState(1);
+  const [loading, setLoading] = React.useState(true);
+
+  const load = React.useCallback(
+    async (f: Filters, p: number) => {
+      setLoading(true);
+      try {
+        const data = await fetchJobs(f, p);
+        setJobs(data.jobs);
+        setTotal(data.total);
+        setTotalPages(data.totalPages);
+      } catch {
+        // Fall back to mock data, apply filters client-side
+        let filtered = MOCK_JOBS_RESPONSE.jobs;
+        if (f.excludeSC) filtered = filtered.filter((j) => j.clearanceStatus !== "REQUIRED");
+        if (f.location !== "ALL") filtered = filtered.filter((j) => j.locationNormalised === f.location);
+        if (f.seniority !== "ALL") filtered = filtered.filter((j) => j.seniority === f.seniority);
+        if (f.domain !== "ALL") filtered = filtered.filter((j) => j.subDomain === f.domain);
+        if (f.sponsorship !== "ALL") filtered = filtered.filter((j) => j.sponsorConfidence === f.sponsorship);
+        const start = (p - 1) * PAGE_SIZE;
+        setJobs(filtered.slice(start, start + PAGE_SIZE));
+        setTotal(filtered.length);
+        setTotalPages(Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  React.useEffect(() => {
+    load(filters, page);
+  }, [filters, page, load]);
+
+  function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+    setPage(1);
+  }
+
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
+
+  return (
+    <div className="p-6 space-y-5">
+      {/* Page heading */}
+      <h1 className="text-xl font-semibold text-slate-900">Job Feed</h1>
+
+      {/* Filters */}
+      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+        {/* Location */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Location</span>
+          <FilterChipGroup
+            options={LOCATION_OPTIONS}
+            value={filters.location}
+            onChange={(v) => updateFilter("location", v)}
+          />
+        </div>
+
+        {/* Seniority */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Seniority</span>
+          <FilterChipGroup
+            options={SENIORITY_OPTIONS}
+            value={filters.seniority}
+            onChange={(v) => updateFilter("seniority", v)}
+          />
+        </div>
+
+        {/* Domain */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Domain</span>
+          <FilterChipGroup
+            options={DOMAIN_OPTIONS}
+            value={filters.domain}
+            onChange={(v) => updateFilter("domain", v)}
+          />
+        </div>
+
+        {/* Sponsorship */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Sponsor</span>
+          <FilterChipGroup
+            options={SPONSOR_OPTIONS}
+            value={filters.sponsorship}
+            onChange={(v) => updateFilter("sponsorship", v)}
+          />
+        </div>
+
+        {/* SC exclusion toggle */}
+        <div className="flex items-center gap-3 pt-1 border-t border-slate-100">
+          <Switch
+            id="exclude-sc"
+            checked={filters.excludeSC}
+            onCheckedChange={(checked) => updateFilter("excludeSC", checked)}
+            aria-label="Hide SC-required roles"
+          />
+          <label
+            htmlFor="exclude-sc"
+            className="text-xs font-medium text-slate-600 cursor-pointer select-none"
+          >
+            Hide SC-required roles
+          </label>
+        </div>
+      </div>
+
+      {/* Results header */}
+      {!loading && (
+        <p className="text-xs text-slate-500">
+          {total === 0
+            ? "No eligible jobs found"
+            : `Showing ${from}–${to} of ${total} jobs`}
+        </p>
+      )}
+
+      {/* Job grid */}
+      {loading ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : jobs.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white py-16 text-center">
+          <p className="text-sm font-medium text-slate-600">
+            No eligible jobs found — try adjusting your filters
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => {
+              setFilters({
+                location: "ALL",
+                seniority: "ALL",
+                domain: "ALL",
+                sponsorship: "ALL",
+                excludeSC: true,
+              });
+              setPage(1);
+            }}
+          >
+            Reset filters
+          </Button>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {jobs.map((job) => (
+            <JobCard key={job.id} job={job} />
+          ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {!loading && total > 0 && (
+        <div className="flex items-center justify-between">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+          >
+            ← Previous
+          </Button>
+          <span className="text-xs text-slate-500">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Next →
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
