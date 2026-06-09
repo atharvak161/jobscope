@@ -19,7 +19,7 @@
  *   // → { ingested: 47, skipped: 12, errors: 1 }
  */
 
-import { PrismaClient } from '../../generated/prisma/client'
+import { prisma } from '../db/client'
 import {
   fetchAdzunaJobs,
   fetchReedJobs,
@@ -33,22 +33,6 @@ import {
   type RawJobListing as PipelineRawJobListing,
   type ProcessedJob,
 } from '../pipeline/process-job'
-
-// ---------------------------------------------------------------------------
-// Module-level Prisma client
-// Lazy: the client is created once and reused across calls in the same
-// process. If the DB is unreachable, individual queries throw and are caught.
-// ---------------------------------------------------------------------------
-
-let prisma: PrismaClient | null = null
-
-function getClient(): PrismaClient {
-  if (!prisma) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prisma = new PrismaClient({} as any)
-  }
-  return prisma
-}
 
 // ---------------------------------------------------------------------------
 // Source-to-enum mapping
@@ -99,7 +83,7 @@ export async function writeRawJob(
   raw: IntegrationRawJobListing,
   hash: string,
 ): Promise<{ wasNew: boolean }> {
-  const db = getClient()
+  const db = prisma
   const sourceEnum = SOURCE_MAP[raw.source.toLowerCase()]
 
   if (!sourceEnum) {
@@ -137,7 +121,7 @@ export async function writeProcessedJob(
   processed: ProcessedJob,
   hash: string,
 ): Promise<void> {
-  const db = getClient()
+  const db = prisma
   const sourceEnum = SOURCE_MAP[processed.source.toLowerCase()]
 
   if (!sourceEnum) {
