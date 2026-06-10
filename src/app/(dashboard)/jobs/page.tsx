@@ -9,7 +9,6 @@ import { Switch } from "@/components/ui/switch";
 import { SponsorBadge } from "@/components/SponsorBadge";
 import { ClearanceBadge } from "@/components/ClearanceBadge";
 import type { Job, JobsApiResponse, SponsorConfidence, LocationType, Seniority } from "@/lib/types";
-import { MOCK_JOBS_RESPONSE } from "@/lib/mock/jobs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,8 +81,8 @@ async function fetchJobs(filters: Filters, page: number): Promise<JobsApiRespons
   const params = new URLSearchParams();
   if (filters.location !== "ALL") params.set("location", filters.location);
   if (filters.seniority !== "ALL") params.set("seniority", filters.seniority);
-  if (filters.domain !== "ALL") params.set("sub_domain", filters.domain);
-  if (filters.sponsorship !== "ALL") params.set("sponsor_confidence", filters.sponsorship);
+  if (filters.domain !== "ALL") params.set("subDomain", filters.domain);
+  if (filters.sponsorship !== "ALL") params.set("sponsorConfidence", filters.sponsorship);
   if (filters.excludeSC) params.set("excludeSC", "true");
   params.set("page", String(page));
   params.set("limit", String(PAGE_SIZE));
@@ -275,17 +274,10 @@ export default function JobsPage() {
         setTotal(data.total);
         setTotalPages(data.totalPages);
       } catch {
-        // Fall back to mock data, apply filters client-side
-        let filtered = MOCK_JOBS_RESPONSE.jobs;
-        if (f.excludeSC) filtered = filtered.filter((j) => j.clearanceStatus !== "REQUIRED");
-        if (f.location !== "ALL") filtered = filtered.filter((j) => j.locationNormalised === f.location);
-        if (f.seniority !== "ALL") filtered = filtered.filter((j) => j.seniority === f.seniority);
-        if (f.domain !== "ALL") filtered = filtered.filter((j) => j.subDomain === f.domain);
-        if (f.sponsorship !== "ALL") filtered = filtered.filter((j) => j.sponsorConfidence === f.sponsorship);
-        const start = (p - 1) * PAGE_SIZE;
-        setJobs(filtered.slice(start, start + PAGE_SIZE));
-        setTotal(filtered.length);
-        setTotalPages(Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+        // No mock fallback — show empty state on API failure
+        setJobs([]);
+        setTotal(0);
+        setTotalPages(1);
       } finally {
         setLoading(false);
       }
