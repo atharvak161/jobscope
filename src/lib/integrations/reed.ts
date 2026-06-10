@@ -145,11 +145,24 @@ function mapReedResult(result: ReedJobResult): RawJobListing {
     salaryMax: result.maximumSalary != null ? Math.round(result.maximumSalary) : undefined,
     location: result.locationName?.trim() ?? '',
     url: result.jobUrl ?? '',
-    postedAt: result.date ? new Date(result.date) : new Date(),
+    postedAt: result.date ? parseReedDate(result.date) : new Date(),
   };
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Parse a Reed API date string in `dd/MM/yyyy HH:mm:ss` format.
+ * JavaScript's Date constructor cannot parse this UK locale format directly.
+ * Falls back to `new Date()` (now) if the string is missing or unparseable.
+ */
+function parseReedDate(dateStr: string): Date {
+  const [datePart, timePart] = dateStr.split(' ');
+  const [day, month, year] = datePart.split('/');
+  const isoStr = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timePart ?? '00:00:00'}`;
+  const d = new Date(isoStr);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
 
 function parseRetryAfterHeader(value: string | null): number | undefined {
   if (!value) return undefined;
