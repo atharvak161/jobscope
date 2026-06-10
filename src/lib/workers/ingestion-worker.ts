@@ -25,6 +25,8 @@ import {
   fetchReedJobs,
   fetchJoobleJobs,
   fetchRemoteOKJobs,
+  fetchJSearchJobs,
+  fetchActiveJobs,
   computeJobHash,
   type RawJobListing as IntegrationRawJobListing,
 } from '../integrations/index'
@@ -39,11 +41,13 @@ import {
 // The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK'> = {
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS'> = {
   adzuna: 'ADZUNA',
   reed: 'REED',
   jooble: 'JOOBLE',
   remoteok: 'REMOTEOK',
+  jsearch: 'JSEARCH',
+  activejobs: 'ACTIVEJOBS',
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +309,57 @@ export async function runIngestionCycle(
       allListings.push(...listings)
     } catch (err) {
       console.warn(`[ingestion-worker] ${adapter.name} adapter failed:`, err)
+      errors++
+    }
+  }
+
+  // ── JSearch: multi-query pass (Google Jobs aggregator via RapidAPI) ────────
+  // Each query fetches page 1 only (conserve free tier quota: 200 req/month).
+  // Skipped gracefully when JSEARCH_API_KEY is not set.
+  const jsearchEnabled = Boolean(process.env.JSEARCH_API_KEY)
+  if (!jsearchEnabled) {
+    console.log('[ingestion-worker] jsearch: no API key configured, skipping')
+  } else {
+    const jsearchQueries = [
+      'cybersecurity uk',
+      'penetration testing uk',
+      'information security uk',
+      'SOC analyst uk',
+      'cloud security uk',
+    ]
+    for (const jsearchQuery of jsearchQueries) {
+      try {
+        const listings = await fetchJSearchJobs(jsearchQuery, 1)
+        allListings.push(...listings)
+      } catch (err) {
+        console.warn(`[ingestion-worker] jsearch query "${jsearchQuery}" failed:`, err)
+        errors++
+      }
+    }
+  }
+
+  // ── Active Jobs DB: multi-query pass (ATS aggregator via RapidAPI) ─────────
+  // Real ATS postings from Greenhouse, Lever, Workday, etc. — last 24 hours.
+  // 1 call per query term; offset fixed at 0 (free tier: ~100 req/month).
+  // fetchActiveJobs returns [] silently when RAPIDAPI_KEY is not set.
+  const activeJobsQueries = [
+    '"cybersecurity" OR "cyber security"',
+    '"penetration testing" OR "pentester"',
+    '"information security" OR "infosec"',
+    '"SOC analyst" OR "security analyst"',
+    '"cloud security" OR "security engineer"',
+  ]
+  for (const activeQuery of activeJobsQueries) {
+    try {
+      const listings = await fetchActiveJobs(activeQuery)
+      if (listings.length === 0 && !process.env.RAPIDAPI_KEY) {
+        // Key not set — log once on first iteration and break
+        console.log('[ingestion-worker] activejobs: no RAPIDAPI_KEY configured, skipping')
+        break
+      }
+      allListings.push(...listings)
+    } catch (err) {
+      console.warn(`[ingestion-worker] activejobs query "${activeQuery}" failed:`, err)
       errors++
     }
   }
