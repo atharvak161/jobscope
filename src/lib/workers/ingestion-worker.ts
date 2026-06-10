@@ -205,14 +205,16 @@ export async function writeProcessedJob(
     }
   }
 
-  // Write sponsor match if the pipeline found one
-  if (processed.matchedSponsorId && processed.sponsorConfidence !== 'UNKNOWN') {
+  // Write sponsor match if the pipeline found one (any confidence tier with a matched sponsor)
+  if (processed.matchedSponsorId) {
     const confidenceEnum: 'CONFIRMED' | 'LIKELY' | 'LOW_CONFIDENCE' | 'UNKNOWN' =
       processed.sponsorConfidence === 'CONFIRMED'
         ? 'CONFIRMED'
         : processed.sponsorConfidence === 'LIKELY'
           ? 'LIKELY'
-          : 'UNKNOWN'
+          : processed.sponsorConfidence === 'LOW_CONFIDENCE'
+            ? 'LOW_CONFIDENCE'
+            : 'UNKNOWN'
 
     // Upsert by unique composite key (jobId, sponsorId)
     const existingMatch = await db.jobSponsorMatch.findUnique({

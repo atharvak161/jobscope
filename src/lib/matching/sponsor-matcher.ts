@@ -5,16 +5,23 @@
  * Licensed Sponsors to determine whether the employer is likely to offer
  * Skilled Worker visa sponsorship.
  *
- * NOTE: DB calls are marked TODO — Prisma schema is being built in parallel
- * by the DB Engineer. When prisma/schema.prisma lands, replace the TODO
- * stubs with the real Prisma client calls shown in the comments.
+ * Resolution order:
+ *   1. Exact match on normalised name + sponsorship mention in description → CONFIRMED
+ *   2. Exact match on normalised name, no mention → LIKELY
+ *   3. pg_trgm similarity ≥ 0.85 + sponsorship mention → CONFIRMED
+ *   4. pg_trgm similarity ≥ 0.85, no mention → LIKELY
+ *   5. pg_trgm similarity 0.60–0.84 → LOW_CONFIDENCE
+ *   6. No DB match + description mentions sponsorship → LIKELY
+ *   7. No match, no mention → UNKNOWN
  */
+
+import { prisma } from '@/lib/db/client'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type SponsorConfidence = 'CONFIRMED' | 'LIKELY' | 'UNKNOWN'
+export type SponsorConfidence = 'CONFIRMED' | 'LIKELY' | 'LOW_CONFIDENCE' | 'UNKNOWN'
 
 export interface SponsorMatchResult {
   confidence: SponsorConfidence
@@ -23,10 +30,9 @@ export interface SponsorMatchResult {
 }
 
 // ---------------------------------------------------------------------------
-// Stub types — remove once Prisma schema is available
+// Internal row shape returned from DB queries
 // ---------------------------------------------------------------------------
 
-/** Minimal shape of a SponsorRegister row. Replace with Prisma-generated type. */
 interface SponsorRegisterRow {
   id: string
   name: string
@@ -124,45 +130,31 @@ export async function matchJobToSponsor(
   }
 
   // -------------------------------------------------------------------------
-  // Step 1: Exact match
+  // Step 1: Exact match on normalised name
   // -------------------------------------------------------------------------
-  // TODO: replace with Prisma call once schema.prisma is available:
-  //
-  //   const exact = await prisma.sponsorRegister.findFirst({
-  //     where: { nameNormalised: normalised, active: true },
-  //     select: { id: true, nameNormalised: true },
-  //   })
-  //
   const exact: SponsorRegisterRow | null = await _exactMatch(normalised)
+  const mentionsSponsorship = descriptionMentionsSponsorship(jobDescription)
 
   if (exact) {
+    if (mentionsSponsorship) {
+      return {
+        confidence: 'CONFIRMED',
+        matchedSponsorId: exact.id,
+        matchReason: `Exact normalised name match: "${normalised}" = "${exact.nameNormalised}" AND description mentions sponsorship (sponsor id: ${exact.id}).`,
+      }
+    }
     return {
-      confidence: 'CONFIRMED',
+      confidence: 'LIKELY',
       matchedSponsorId: exact.id,
-      matchReason: `Exact normalised name match: "${normalised}" = "${exact.nameNormalised}" (sponsor id: ${exact.id}).`,
+      matchReason: `Exact normalised name match: "${normalised}" = "${exact.nameNormalised}", no explicit sponsorship mention in description (sponsor id: ${exact.id}).`,
     }
   }
 
   // -------------------------------------------------------------------------
   // Step 2 + 3 + 4: Fuzzy match via pg_trgm
   // -------------------------------------------------------------------------
-  // TODO: replace with raw Prisma query once schema.prisma is available:
-  //
-  //   const fuzzy = await prisma.$queryRaw<SponsorRegisterRow[]>`
-  //     SELECT id, name, name_normalised AS "nameNormalised",
-  //            similarity(name_normalised, ${normalised}) AS similarity
-  //     FROM "SponsorRegister"
-  //     WHERE active = true
-  //       AND similarity(name_normalised, ${normalised}) > 0.60
-  //     ORDER BY similarity DESC
-  //     LIMIT 1
-  //   `
-  //   const best = fuzzy[0] ?? null
-  //
   const best: (SponsorRegisterRow & { similarity: number }) | null =
     await _fuzzyMatch(normalised)
-
-  const mentionsSponsorship = descriptionMentionsSponsorship(jobDescription)
 
   if (best) {
     const sim = best.similarity
@@ -172,22 +164,21 @@ export async function matchJobToSponsor(
         return {
           confidence: 'CONFIRMED',
           matchedSponsorId: best.id,
-          matchReason: `Fuzzy match similarity ${sim.toFixed(3)} ≥ 0.85 AND description explicitly mentions sponsorship/Skilled Worker/Tier 2 (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
+          matchReason: `Fuzzy match similarity ${sim.toFixed(3)} ≥ 0.85 AND description mentions sponsorship (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
         }
       }
       return {
         confidence: 'LIKELY',
         matchedSponsorId: best.id,
-        matchReason: `Fuzzy match similarity ${sim.toFixed(3)} ≥ 0.85, no explicit sponsorship mention in description (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
+        matchReason: `Fuzzy match similarity ${sim.toFixed(3)} ≥ 0.85, no explicit sponsorship mention (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
       }
     }
 
     if (sim >= 0.6) {
-      // Low confidence — flag for manual review but don't surface as LIKELY
       return {
-        confidence: 'UNKNOWN',
+        confidence: 'LOW_CONFIDENCE',
         matchedSponsorId: best.id,
-        matchReason: `Low-confidence fuzzy match similarity ${sim.toFixed(3)} (0.60–0.84) — flagged for manual review (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
+        matchReason: `Low-confidence fuzzy match similarity ${sim.toFixed(3)} (0.60–0.84) — partial register match (sponsor id: ${best.id}, matched name: "${best.nameNormalised}").`,
       }
     }
   }
@@ -211,29 +202,42 @@ export async function matchJobToSponsor(
 }
 
 // ---------------------------------------------------------------------------
-// DB stub implementations — replace with Prisma calls post-schema delivery
+// DB implementations — real Prisma lookups
 // ---------------------------------------------------------------------------
 
 /**
- * TODO: Replace with Prisma ORM call.
- * Stub returns null (no match) until DB layer is wired.
+ * Exact match: case-insensitive lookup on normalised company name.
+ * Returns the first active SponsorRegister row whose nameNormalised equals
+ * the supplied normalised string, or null if no match.
  */
 async function _exactMatch(normalised: string): Promise<SponsorRegisterRow | null> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void normalised
-  // TODO: prisma.sponsorRegister.findFirst({ where: { nameNormalised: normalised, active: true } })
-  return null
+  const row = await prisma.sponsorRegister.findFirst({
+    where: { nameNormalised: normalised, active: true },
+    select: { id: true, name: true, nameNormalised: true },
+  })
+  return row ?? null
 }
 
 /**
- * TODO: Replace with Prisma $queryRaw pg_trgm call.
- * Stub returns null (no match) until DB layer is wired.
+ * Fuzzy match via pg_trgm similarity on the normalised name column.
+ * Returns the best-scoring active row with similarity > 0.60, or null.
+ *
+ * Requires: pg_trgm extension + GIN index on "nameNormalised" (003_trgm_index.sql).
  */
 async function _fuzzyMatch(
   normalised: string,
 ): Promise<(SponsorRegisterRow & { similarity: number }) | null> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  void normalised
-  // TODO: prisma.$queryRaw`SELECT ... similarity(name_normalised, ${normalised}) ... FROM "SponsorRegister" WHERE similarity(...) > 0.60 ORDER BY similarity DESC LIMIT 1`
-  return null
+  const rows = await prisma.$queryRaw<Array<{ id: string; name: string; nameNormalised: string; similarity: number }>>`
+    SELECT
+      id,
+      name,
+      "nameNormalised",
+      similarity("nameNormalised", ${normalised}) AS similarity
+    FROM "SponsorRegister"
+    WHERE active = true
+      AND similarity("nameNormalised", ${normalised}) > 0.60
+    ORDER BY similarity DESC
+    LIMIT 1
+  `
+  return rows[0] ?? null
 }
