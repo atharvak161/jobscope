@@ -17,7 +17,8 @@ async function getJob(id: string): Promise<Job | null> {
       cache: "no-store",
     });
     if (!res.ok) return null;
-    return res.json() as Promise<Job>;
+    const data = await res.json() as { job: Job; userApplication: unknown };
+    return data.job ?? null;
   } catch {
     return null;
   }
