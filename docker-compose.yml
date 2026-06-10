@@ -28,6 +28,7 @@ services:
       REED_API_KEY: ${REED_API_KEY}
       JOOBLE_API_KEY: ${JOOBLE_API_KEY}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      INGEST_SECRET: ${INGEST_SECRET:-change-me}
       CLOUDFLARE_R2_ACCOUNT_ID: ${CLOUDFLARE_R2_ACCOUNT_ID:-}
       R2_BUCKET: ${R2_BUCKET:-}
       R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
@@ -36,6 +37,22 @@ services:
       db:
         condition: service_healthy
     command: sh -c "npx prisma db push --accept-data-loss && npm start"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    build: .
+    command: sh -c "while true; do wget -q -O- --post-data='' --header='x-ingest-token:${INGEST_SECRET:-change-me}' http://app:3000/api/ingest || true; sleep 21600; done"
+    environment:
+      - INGEST_SECRET=${INGEST_SECRET:-change-me}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
