@@ -30,6 +30,7 @@ import {
   fetchIndeedJobs,
   fetchMonsterJobs,
   fetchRemootejobs,
+  fetchGlassdoorJobs,
   computeJobHash,
   type RawJobListing as IntegrationRawJobListing,
 } from '../integrations/index'
@@ -44,7 +45,7 @@ import {
 // The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS' | 'INDEED' | 'MONSTER' | 'REMOOTE'> = {
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS' | 'INDEED' | 'MONSTER' | 'REMOOTE' | 'GLASSDOOR'> = {
   adzuna: 'ADZUNA',
   reed: 'REED',
   jooble: 'JOOBLE',
@@ -54,6 +55,7 @@ const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JS
   indeed: 'INDEED',
   monster: 'MONSTER',
   remoote: 'REMOOTE',
+  glassdoor: 'GLASSDOOR',
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +436,29 @@ export async function runIngestionCycle(
         allListings.push(...listings)
       } catch (err) {
         console.warn(`[ingestion-worker] remoote query "${remooteQuery}" failed:`, err)
+        errors++
+      }
+    }
+  }
+
+  // ── Glassdoor: multi-query pass (Glassdoor Scraper via RapidAPI) ─────────
+  // fetchGlassdoorJobs returns [] silently when RAPIDAPI_KEY is not set.
+  const glassdoorQueries = [
+    'cybersecurity uk',
+    'penetration testing uk',
+    'information security uk',
+    'SOC analyst uk',
+    'security engineer uk',
+  ]
+  if (!process.env.RAPIDAPI_KEY) {
+    console.log('[ingestion-worker] glassdoor: no RAPIDAPI_KEY configured, skipping')
+  } else {
+    for (const glassdoorQuery of glassdoorQueries) {
+      try {
+        const listings = await fetchGlassdoorJobs(glassdoorQuery)
+        allListings.push(...listings)
+      } catch (err) {
+        console.warn(`[ingestion-worker] glassdoor query "${glassdoorQuery}" failed:`, err)
         errors++
       }
     }
