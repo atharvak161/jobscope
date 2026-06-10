@@ -9,7 +9,6 @@ import {
   ClipboardList,
   FileText,
   Search,
-  Target,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -71,7 +70,14 @@ export default function DashboardLayout({
       <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
         {/* Logo */}
         <div className="flex h-14 items-center gap-2 border-b border-slate-200 px-4">
-          <Target className="h-6 w-6 text-blue-600" aria-hidden="true" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/favicon.ico"
+            alt="JobScope"
+            width={24}
+            height={24}
+            className="h-6 w-6 shrink-0"
+          />
           <span className="text-base font-semibold text-slate-900">
             JobScope
           </span>
