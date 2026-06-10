@@ -48,14 +48,18 @@ export async function GET(
   // Fetch the user's application for this job if one exists.
   // userId is taken from the session — not from the request body/params —
   // so this cannot be manipulated to reveal another user's application.
-  const application = await prisma.application.findUnique({
-    where: {
-      userId_jobId: {
-        userId: session.id,
-        jobId: id,
-      },
-    },
-  })
+  // Guard: session.id may be a non-UUID stub in local/dev mode; skip lookup to avoid DB type error.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const application = UUID_RE.test(session.id)
+    ? await prisma.application.findUnique({
+        where: {
+          userId_jobId: {
+            userId: session.id,
+            jobId: id,
+          },
+        },
+      })
+    : null
 
   return NextResponse.json({
     job,
