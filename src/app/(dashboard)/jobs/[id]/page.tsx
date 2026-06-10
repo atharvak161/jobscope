@@ -12,7 +12,8 @@ import { JobActions } from "./JobActions";
 
 async function getJob(id: string): Promise<Job | null> {
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api/jobs/${id}`, {
+    const base = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+    const res = await fetch(`${base}/api/jobs/${id}`, {
       cache: "no-store",
     });
     if (!res.ok) return null;
