@@ -6,21 +6,19 @@ import { Separator } from "@/components/ui/separator";
 import { SponsorBadge } from "@/components/SponsorBadge";
 import { ClearanceBadge } from "@/components/ClearanceBadge";
 import type { Job } from "@/lib/types";
-import { MOCK_JOBS } from "@/lib/mock/jobs";
 import { JobActions } from "./JobActions";
 
 // ─── Data fetching ────────────────────────────────────────────────────────────
 
-async function getJob(id: string): Promise<Job> {
+async function getJob(id: string): Promise<Job | null> {
   try {
     const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL ?? ""}/api/jobs/${id}`, {
       cache: "no-store",
     });
-    if (!res.ok) throw new Error("Not found");
+    if (!res.ok) return null;
     return res.json() as Promise<Job>;
   } catch {
-    // Fall back to first mock job that matches, or just the first mock
-    return MOCK_JOBS.find((j) => j.id === id) ?? MOCK_JOBS[0];
+    return null;
   }
 }
 
@@ -103,6 +101,18 @@ export default async function JobDetailPage({
 }) {
   const { id } = await params;
   const job = await getJob(id);
+
+  if (!job) {
+    return (
+      <div className="p-6">
+        <Link href="/jobs" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors mb-6">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          All Jobs
+        </Link>
+        <p className="text-slate-500 mt-8 text-center">Job not found.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
