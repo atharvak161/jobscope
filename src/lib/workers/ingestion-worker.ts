@@ -27,6 +27,9 @@ import {
   fetchRemoteOKJobs,
   fetchJSearchJobs,
   fetchActiveJobs,
+  fetchIndeedJobs,
+  fetchMonsterJobs,
+  fetchRemootejobs,
   computeJobHash,
   type RawJobListing as IntegrationRawJobListing,
 } from '../integrations/index'
@@ -41,13 +44,16 @@ import {
 // The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS'> = {
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'JOOBLE' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS' | 'INDEED' | 'MONSTER' | 'REMOOTE'> = {
   adzuna: 'ADZUNA',
   reed: 'REED',
   jooble: 'JOOBLE',
   remoteok: 'REMOTEOK',
   jsearch: 'JSEARCH',
   activejobs: 'ACTIVEJOBS',
+  indeed: 'INDEED',
+  monster: 'MONSTER',
+  remoote: 'REMOOTE',
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +367,75 @@ export async function runIngestionCycle(
     } catch (err) {
       console.warn(`[ingestion-worker] activejobs query "${activeQuery}" failed:`, err)
       errors++
+    }
+  }
+
+  // ── Indeed: multi-query pass (Indeed Scraper via RapidAPI) ───────────────
+  // fetchIndeedJobs returns [] silently when RAPIDAPI_KEY is not set.
+  const indeedQueries = [
+    'cybersecurity uk',
+    'penetration testing uk',
+    'information security uk',
+    'SOC analyst uk',
+    'cloud security uk',
+  ]
+  if (!process.env.RAPIDAPI_KEY) {
+    console.log('[ingestion-worker] indeed: no RAPIDAPI_KEY configured, skipping')
+  } else {
+    for (const indeedQuery of indeedQueries) {
+      try {
+        const listings = await fetchIndeedJobs(indeedQuery)
+        allListings.push(...listings)
+      } catch (err) {
+        console.warn(`[ingestion-worker] indeed query "${indeedQuery}" failed:`, err)
+        errors++
+      }
+    }
+  }
+
+  // ── Monster: multi-query pass (Monster Jobs via RapidAPI) ────────────────
+  // fetchMonsterJobs returns [] silently when RAPIDAPI_KEY is not set.
+  const monsterQueries = [
+    'cybersecurity',
+    'penetration testing',
+    'information security',
+    'SOC analyst',
+    'cloud security',
+  ]
+  if (!process.env.RAPIDAPI_KEY) {
+    console.log('[ingestion-worker] monster: no RAPIDAPI_KEY configured, skipping')
+  } else {
+    for (const monsterQuery of monsterQueries) {
+      try {
+        const listings = await fetchMonsterJobs(monsterQuery)
+        allListings.push(...listings)
+      } catch (err) {
+        console.warn(`[ingestion-worker] monster query "${monsterQuery}" failed:`, err)
+        errors++
+      }
+    }
+  }
+
+  // ── Remoote: multi-query pass (Remoote Job Search via RapidAPI) ──────────
+  // fetchRemootejobs returns [] silently when RAPIDAPI_KEY is not set.
+  const remooteQueries = [
+    'cybersecurity',
+    'penetration testing',
+    'information security',
+    'security engineer',
+    'SOC analyst',
+  ]
+  if (!process.env.RAPIDAPI_KEY) {
+    console.log('[ingestion-worker] remoote: no RAPIDAPI_KEY configured, skipping')
+  } else {
+    for (const remooteQuery of remooteQueries) {
+      try {
+        const listings = await fetchRemootejobs(remooteQuery)
+        allListings.push(...listings)
+      } catch (err) {
+        console.warn(`[ingestion-worker] remoote query "${remooteQuery}" failed:`, err)
+        errors++
+      }
     }
   }
 

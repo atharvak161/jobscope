@@ -10,7 +10,7 @@ export async function GET() {
     await prisma.$queryRaw`SELECT 1`
 
     // Check job source freshness (25h threshold per SLO)
-    const sources = ['ADZUNA', 'REED', 'JOOBLE', 'REMOTEOK']
+    const sources = ['ADZUNA', 'REED', 'JOOBLE', 'REMOTEOK', 'JSEARCH']
     const freshnessChecks = await Promise.all(
       sources.map(async (source) => {
         const latest = await prisma.rawJobIngestion.findFirst({
