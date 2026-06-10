@@ -23,6 +23,7 @@ services:
       DATABASE_URL: postgresql://jobscope:jobscope@db:5432/jobscope
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       NEXTAUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
       ADZUNA_APP_ID: ${ADZUNA_APP_ID}
       ADZUNA_API_KEY: ${ADZUNA_API_KEY}
       REED_API_KEY: ${REED_API_KEY}
