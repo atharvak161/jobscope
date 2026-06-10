@@ -10,7 +10,12 @@
  * would incorrectly treat the update as a new listing.
  *
  * Hash composition: SHA-256 of the pipe-delimited string:
- *   {source}|{externalId}|{company}|{title}
+ *   {source}|{externalId}
+ *
+ * This matches the Job table's identity key — the unique constraint is on
+ * (source, externalId) only. Including company or title in the hash caused
+ * a re-fetched job with a minor title edit to produce a new hash, which was
+ * then treated as a brand-new listing and inserted as a duplicate.
  *
  * All components are lowercased and trimmed before hashing to prevent
  * hash mismatches caused purely by whitespace or capitalisation differences.
@@ -50,8 +55,6 @@ export function computeJobHash(job: RawJobListing): string {
   const input = [
     job.source.toLowerCase().trim(),
     job.externalId.toLowerCase().trim(),
-    job.company.toLowerCase().trim(),
-    job.title.toLowerCase().trim(),
   ].join('|');
 
   return createHash('sha256').update(input, 'utf8').digest('hex');
