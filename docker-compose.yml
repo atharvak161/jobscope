@@ -38,11 +38,11 @@ services:
         condition: service_healthy
     command: sh -c "npx prisma db push --accept-data-loss && npm start"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/healthz || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
   worker:
     build: .
