@@ -13,7 +13,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SponsorBadge } from "@/components/SponsorBadge";
 import type { Application, ApplicationStatus } from "@/lib/types";
-import { MOCK_APPLICATIONS } from "@/lib/mock/applications";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -390,7 +389,8 @@ export default function ApplicationsPage() {
         const data = (await res.json()) as { applications: Application[] };
         if (!cancelled) setApplications(data.applications);
       } catch {
-        if (!cancelled) setApplications(MOCK_APPLICATIONS);
+        // No mock fallback — show empty state on API failure
+        if (!cancelled) setApplications([]);
       } finally {
         if (!cancelled) setLoading(false);
       }

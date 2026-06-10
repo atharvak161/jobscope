@@ -15,10 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SponsorBadge } from "@/components/SponsorBadge";
-import { ClearanceBadge } from "@/components/ClearanceBadge";
 import type { Job, Application, JobStatsApiResponse } from "@/lib/types";
-import { MOCK_JOBS_RESPONSE, MOCK_JOB_STATS } from "@/lib/mock/jobs";
-import { MOCK_APPLICATIONS } from "@/lib/mock/applications";
 
 interface DashboardData {
   stats: JobStatsApiResponse;
@@ -103,10 +100,17 @@ async function fetchDashboardData(): Promise<DashboardData> {
       recentApplications: appsData.applications ?? [],
     };
   } catch {
+    // No mock fallback — show empty/zero state on API failure
     return {
-      stats: MOCK_JOB_STATS,
-      recentJobs: MOCK_JOBS_RESPONSE.jobs.slice(0, 5),
-      recentApplications: MOCK_APPLICATIONS.slice(0, 5),
+      stats: {
+        newToday: 0,
+        totalEligible: 0,
+        confirmedSponsors: 0,
+        likelySponsors: 0,
+        unknownSponsors: 0,
+      },
+      recentJobs: [],
+      recentApplications: [],
     };
   }
 }
