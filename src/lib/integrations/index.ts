@@ -21,6 +21,8 @@ export { fetchAdzunaJobs } from './adzuna';
 export { fetchReedJobs } from './reed';
 export { fetchJoobleJobs } from './jooble';
 export { fetchRemoteOKJobs } from './remoteok';
+export { fetchJSearchJobs } from './jsearch';
+export { fetchActiveJobs } from './activejobs';
 
 // gov.uk sponsor register worker
 export {

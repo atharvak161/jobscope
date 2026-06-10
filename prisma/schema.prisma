@@ -35,6 +35,8 @@ enum JobSource {
   REED
   JOOBLE
   REMOTEOK
+  JSEARCH
+  ACTIVEJOBS
   RSS_JSONLD
   GOV_UK
 }
