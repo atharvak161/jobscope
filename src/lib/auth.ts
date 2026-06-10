@@ -1,17 +1,14 @@
-import { auth } from '@/lib/auth-config'
-
 export interface SessionUser {
   id: string
   email: string
   name?: string
 }
 
-export async function getSession(): Promise<SessionUser | null> {
-  const session = await auth()
-  if (!session?.user?.email) return null
+// Auth removed — local personal tool. Always return the single local user.
+export async function getSession(): Promise<SessionUser> {
   return {
-    id: (session.user as { id?: string }).id ?? session.user.email,
-    email: session.user.email,
-    name: session.user.name ?? undefined,
+    id: 'local-user',
+    email: 'local@jobscope.local',
+    name: 'Local User',
   }
 }
