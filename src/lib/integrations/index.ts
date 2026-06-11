@@ -22,7 +22,6 @@ export { fetchReedJobs } from './reed';
 export { fetchRemoteOKJobs } from './remoteok';
 export { fetchJSearchJobs } from './jsearch';
 export { fetchActiveJobs } from './activejobs';
-export { fetchGlassdoorJobs } from './glassdoor';
 export { fetchIndeedJobs } from './indeed';
 export { fetchRemootejobs } from './remoote';
 

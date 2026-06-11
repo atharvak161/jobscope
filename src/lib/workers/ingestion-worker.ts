@@ -3,7 +3,7 @@
  *
  * Connects the job-source adapters to the database:
  *
- *   1. Calls the job-source adapters (Adzuna, Reed, RemoteOK, JSearch, ActiveJobs, Glassdoor, Indeed, Remoote)
+ *   1. Calls the job-source adapters (Adzuna, Reed, RemoteOK, JSearch, ActiveJobs, Indeed, Remoote)
  *   2. Computes a stable content hash via dedup.ts
  *   3. Writes to RawJobIngestion (upsert on contentHash — skip duplicates)
  *   4. Calls process-job.ts to run the matching + eligibility pipeline
@@ -26,7 +26,6 @@ import {
   fetchRemoteOKJobs,
   fetchJSearchJobs,
   fetchActiveJobs,
-  fetchGlassdoorJobs,
   fetchIndeedJobs,
   fetchRemootejobs,
   computeJobHash,
@@ -87,13 +86,12 @@ async function runQueriesWithQuotaGuard(
 // The Prisma schema JobSource enum is uppercase; adapter source strings are lowercase.
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS' | 'GLASSDOOR' | 'INDEED' | 'REMOOTE'> = {
+const SOURCE_MAP: Record<string, 'ADZUNA' | 'REED' | 'REMOTEOK' | 'JSEARCH' | 'ACTIVEJOBS' | 'INDEED' | 'REMOOTE'> = {
   adzuna: 'ADZUNA',
   reed: 'REED',
   remoteok: 'REMOTEOK',
   jsearch: 'JSEARCH',
   activejobs: 'ACTIVEJOBS',
-  glassdoor: 'GLASSDOOR',
   indeed: 'INDEED',
   remoote: 'REMOOTE',
 }
@@ -409,11 +407,11 @@ export async function runIngestionCycle(
     }
   }
 
-  // ── RapidAPI scrapers: Glassdoor, Indeed, Remoote ────────────────────────
+  // ── RapidAPI scrapers: Indeed, Remoote ───────────────────────────────────
   // Each source runs independently. If one hits its monthly quota limit
   // (HTTP 402/403/429) it stops immediately and the others keep running.
   if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] RAPIDAPI_KEY not set — skipping Glassdoor, Indeed, Remoote')
+    console.log('[ingestion-worker] RAPIDAPI_KEY not set — skipping Indeed, Remoote')
   } else {
     const scraperQueries = [
       'cybersecurity uk',
@@ -422,12 +420,6 @@ export async function runIngestionCycle(
       'SOC analyst uk',
       'security engineer uk',
     ]
-
-    const { listings: glassdoorListings, errors: glassdoorErrors } = await runQueriesWithQuotaGuard(
-      'glassdoor', scraperQueries, fetchGlassdoorJobs,
-    )
-    allListings.push(...glassdoorListings)
-    errors += glassdoorErrors
 
     const { listings: indeedListings, errors: indeedErrors } = await runQueriesWithQuotaGuard(
       'indeed', scraperQueries, fetchIndeedJobs,

@@ -3,7 +3,7 @@
  * Every adapter normalises its source data into RawJobListing before returning.
  */
 
-export type JobSource = 'adzuna' | 'reed' | 'remoteok' | 'jsearch' | 'activejobs' | 'glassdoor' | 'indeed' | 'remoote';
+export type JobSource = 'adzuna' | 'reed' | 'remoteok' | 'jsearch' | 'activejobs' | 'indeed' | 'remoote';
 
 export interface RawJobListing {
   source: JobSource;
