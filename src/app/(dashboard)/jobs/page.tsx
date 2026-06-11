@@ -45,11 +45,13 @@ const SENIORITY_OPTIONS: { label: string; value: SeniorityFilter }[] = [
 
 const DOMAIN_OPTIONS: { label: string; value: DomainFilter }[] = [
   { label: "All", value: "ALL" },
-  { label: "SOC", value: "SOC" },
-  { label: "Pentest", value: "Penetration Testing" },
-  { label: "GRC", value: "GRC" },
-  { label: "AppSec", value: "AppSec" },
-  { label: "Cloud", value: "Cloud" },
+  { label: "SOC / Analyst", value: "SOC_ANALYST" },
+  { label: "Pentest", value: "PENETRATION_TESTER" },
+  { label: "GRC / Compliance", value: "GRC_COMPLIANCE" },
+  { label: "AppSec", value: "APP_SEC" },
+  { label: "Cloud Security", value: "CLOUD_SECURITY" },
+  { label: "Infrastructure", value: "INFRASTRUCTURE_SECURITY" },
+  { label: "Vuln Management", value: "VULN_MANAGEMENT" },
 ];
 
 const SPONSOR_OPTIONS: { label: string; value: SponsorFilter }[] = [
