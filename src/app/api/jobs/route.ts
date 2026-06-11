@@ -147,6 +147,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Posted-within date filter
+  const postedWithinParam = searchParams.get('postedWithin')
+  if (postedWithinParam && postedWithinParam !== 'ALL') {
+    const days = parseInt(postedWithinParam, 10)
+    if (!isNaN(days) && days > 0) {
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      where.postedAt = { gte: cutoff }
+    }
+  }
+
   // ── Query ─────────────────────────────────────────────────────────────────
   const [jobs, total] = await prisma.$transaction([
     prisma.job.findMany({
