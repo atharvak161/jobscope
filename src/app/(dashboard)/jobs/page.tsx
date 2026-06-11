@@ -143,6 +143,7 @@ function JobCard({ job }: { job: Job }) {
   const [applying, setApplying] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [applied, setApplied] = React.useState(false);
+  const [noUrlNotice, setNoUrlNotice] = React.useState(false);
 
   async function handleSave(e: React.MouseEvent) {
     e.preventDefault();
@@ -163,6 +164,12 @@ function JobCard({ job }: { job: Job }) {
     try {
       await postApplication(job.id, "APPLIED");
       setApplied(true);
+      if (job.sourceUrl) {
+        window.open(job.sourceUrl, "_blank", "noopener,noreferrer");
+      } else {
+        setNoUrlNotice(true);
+        setTimeout(() => setNoUrlNotice(false), 4000);
+      }
     } catch {
       // silently fail — offline/mock mode
     } finally {
@@ -226,6 +233,9 @@ function JobCard({ job }: { job: Job }) {
           {applied ? "Applied ✓" : applying ? "Applying…" : "Apply"}
         </Button>
       </div>
+      {noUrlNotice && (
+        <p className="text-xs text-slate-500 text-center">No direct link available</p>
+      )}
     </article>
   );
 }
