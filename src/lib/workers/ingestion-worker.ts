@@ -34,11 +34,55 @@ import {
   computeJobHash,
   type RawJobListing as IntegrationRawJobListing,
 } from '../integrations/index'
+import { RateLimitError, AdapterError } from '../integrations/types'
 import {
   processRawJob,
   type RawJobListing as PipelineRawJobListing,
   type ProcessedJob,
 } from '../pipeline/process-job'
+
+// ---------------------------------------------------------------------------
+// Quota-aware multi-query runner
+// Runs a list of queries against a single source. If ANY query returns a
+// quota-exhausted or rate-limit error (HTTP 402, 403, 429, or RateLimitError),
+// the remaining queries for THAT source are skipped immediately — the source is
+// exhausted for this billing period. Other sources are unaffected.
+// ---------------------------------------------------------------------------
+
+async function runQueriesWithQuotaGuard(
+  sourceName: string,
+  queries: string[],
+  fetchFn: (query: string) => Promise<IntegrationRawJobListing[]>,
+): Promise<{ listings: IntegrationRawJobListing[]; errors: number }> {
+  const listings: IntegrationRawJobListing[] = []
+  let errors = 0
+
+  for (const query of queries) {
+    try {
+      const results = await fetchFn(query)
+      listings.push(...results)
+    } catch (err) {
+      const isQuotaExhausted =
+        err instanceof RateLimitError ||
+        (err instanceof AdapterError && (err.statusCode === 402 || err.statusCode === 403 || err.statusCode === 429))
+
+      if (isQuotaExhausted) {
+        console.warn(
+          `[ingestion-worker] ${sourceName}: quota exhausted or rate-limited (skipping remaining ${queries.length} queries for this source)`,
+          err instanceof AdapterError ? `HTTP ${err.statusCode}` : 'RateLimitError',
+        )
+        // Stop all remaining queries for this source — quota is gone
+        break
+      }
+
+      // Transient error (network, timeout, unexpected shape) — log and try next query
+      console.warn(`[ingestion-worker] ${sourceName} query "${query}" failed (transient):`, (err as Error).message)
+      errors++
+    }
+  }
+
+  return { listings, errors }
+}
 
 // ---------------------------------------------------------------------------
 // Source-to-enum mapping
@@ -171,6 +215,7 @@ export async function writeProcessedJob(
         employerNormalised: processed.companyNameNormalised,
         description: processed.description,
         location: processed.location,
+        locationNormalised: processed.locationNormalised,
         salaryMinGbp: processed.salaryMin,
         salaryMaxGbp: processed.salaryMax,
         postedAt: new Date(processed.postedAt),
@@ -194,6 +239,7 @@ export async function writeProcessedJob(
         employerNormalised: processed.companyNameNormalised,
         description: processed.description,
         location: processed.location,
+        locationNormalised: processed.locationNormalised,
         salaryMinGbp: processed.salaryMin,
         salaryMaxGbp: processed.salaryMax,
         postedAt: new Date(processed.postedAt),
@@ -372,93 +418,44 @@ export async function runIngestionCycle(
     }
   }
 
-  // ── Glassdoor: multi-query pass (Glassdoor Scraper via RapidAPI) ─────────
-  // fetchGlassdoorJobs returns [] silently when RAPIDAPI_KEY is not set.
-  const glassdoorQueries = [
-    'cybersecurity uk',
-    'penetration testing uk',
-    'information security uk',
-    'SOC analyst uk',
-    'security engineer uk',
-  ]
+  // ── RapidAPI scrapers: Glassdoor, Indeed, Monster, Remoote ───────────────
+  // Each source runs independently. If one hits its monthly quota limit
+  // (HTTP 402/403/429) it stops immediately and the others keep running.
   if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] glassdoor: no RAPIDAPI_KEY configured, skipping')
+    console.log('[ingestion-worker] RAPIDAPI_KEY not set — skipping Glassdoor, Indeed, Monster, Remoote')
   } else {
-    for (const glassdoorQuery of glassdoorQueries) {
-      try {
-        const listings = await fetchGlassdoorJobs(glassdoorQuery)
-        allListings.push(...listings)
-      } catch (err) {
-        console.warn(`[ingestion-worker] glassdoor query "${glassdoorQuery}" failed:`, err)
-        errors++
-      }
-    }
-  }
+    const scraperQueries = [
+      'cybersecurity uk',
+      'penetration testing uk',
+      'information security uk',
+      'SOC analyst uk',
+      'security engineer uk',
+    ]
 
-  // ── Indeed: multi-query pass (Indeed Scraper via RapidAPI) ───────────────
-  const indeedQueries = [
-    'cybersecurity uk',
-    'penetration testing uk',
-    'information security uk',
-    'SOC analyst uk',
-    'security engineer uk',
-  ]
-  if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] indeed: no RAPIDAPI_KEY configured, skipping')
-  } else {
-    for (const indeedQuery of indeedQueries) {
-      try {
-        const listings = await fetchIndeedJobs(indeedQuery)
-        allListings.push(...listings)
-      } catch (err) {
-        console.warn(`[ingestion-worker] indeed query "${indeedQuery}" failed:`, err)
-        errors++
-      }
-    }
-  }
+    const { listings: glassdoorListings, errors: glassdoorErrors } = await runQueriesWithQuotaGuard(
+      'glassdoor', scraperQueries, fetchGlassdoorJobs,
+    )
+    allListings.push(...glassdoorListings)
+    errors += glassdoorErrors
 
-  // ── Monster: multi-query pass (Monster Jobs via RapidAPI) ─────────────────
-  const monsterQueries = [
-    'cybersecurity',
-    'penetration testing',
-    'information security',
-    'SOC analyst',
-    'security engineer',
-  ]
-  if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] monster: no RAPIDAPI_KEY configured, skipping')
-  } else {
-    for (const monsterQuery of monsterQueries) {
-      try {
-        const listings = await fetchMonsterJobs(monsterQuery)
-        allListings.push(...listings)
-      } catch (err) {
-        console.warn(`[ingestion-worker] monster query "${monsterQuery}" failed:`, err)
-        errors++
-      }
-    }
-  }
+    const { listings: indeedListings, errors: indeedErrors } = await runQueriesWithQuotaGuard(
+      'indeed', scraperQueries, fetchIndeedJobs,
+    )
+    allListings.push(...indeedListings)
+    errors += indeedErrors
 
-  // ── Remoote: multi-query pass (Remoote Job Search via RapidAPI) ───────────
-  const remooteQueries = [
-    'cybersecurity',
-    'penetration testing',
-    'information security',
-    'SOC analyst',
-    'security engineer',
-  ]
-  if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] remoote: no RAPIDAPI_KEY configured, skipping')
-  } else {
-    for (const remooteQuery of remooteQueries) {
-      try {
-        const listings = await fetchRemootejobs(remooteQuery)
-        allListings.push(...listings)
-      } catch (err) {
-        console.warn(`[ingestion-worker] remoote query "${remooteQuery}" failed:`, err)
-        errors++
-      }
-    }
+    const monsterQueries = ['cybersecurity', 'penetration testing', 'information security', 'SOC analyst', 'security engineer']
+    const { listings: monsterListings, errors: monsterErrors } = await runQueriesWithQuotaGuard(
+      'monster', monsterQueries, fetchMonsterJobs,
+    )
+    allListings.push(...monsterListings)
+    errors += monsterErrors
+
+    const { listings: remooteListings, errors: remooteErrors } = await runQueriesWithQuotaGuard(
+      'remoote', monsterQueries, fetchRemootejobs,
+    )
+    allListings.push(...remooteListings)
+    errors += remooteErrors
   }
 
   // ── 2. Process each listing ────────────────────────────────────────────────

@@ -74,6 +74,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? sponsorConfidenceParam.split(',').map(s => s.trim()).filter(Boolean) as $Enums.SponsorConfidence[]
     : undefined
 
+  const locationParam = searchParams.get('location')
+
   // ── Build WHERE clause ────────────────────────────────────────────────────
   const where: Prisma.JobWhereInput = {
     isActive: true,
@@ -112,6 +114,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     where.subDomain = { in: subDomainValues }
   }
 
+  // Location filter — try locationNormalised enum first, fall back to raw text ILIKE.
+  // Uses AND to avoid conflating location conditions with the keyword OR block.
+  if (locationParam && locationParam !== 'ALL') {
+    const locationKeywordMap: Record<string, string> = {
+      LONDON: 'london',
+      REMOTE: 'remote',
+      HYBRID: 'hybrid',
+      UK_OTHER: 'uk',
+    }
+    const keyword = locationKeywordMap[locationParam]
+    if (keyword) {
+      where.AND = [
+        {
+          OR: [
+            // Match via normalised enum (correct for new jobs post-pipeline-fix)
+            { locationNormalised: locationParam as $Enums.LocationType },
+            // Fall back to raw text contains (covers legacy UNKNOWN-normalised jobs)
+            { location: { contains: keyword, mode: 'insensitive' } },
+          ],
+        },
+      ]
+    }
+  }
+
   // Sponsor confidence filter — applied via sponsorMatches relation
   if (sponsorConfidenceValues && sponsorConfidenceValues.length > 0) {
     where.sponsorMatches = {
@@ -137,8 +163,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     prisma.job.count({ where }),
   ])
 
+  // Derive top-level sponsorConfidence from the best (highest confidence) sponsorMatch
+  // The Job type in types.ts expects a flat sponsorConfidence field, not a nested relation.
+  function getBestConfidence(
+    matches: { confidenceTier: $Enums.SponsorConfidence }[],
+  ): $Enums.SponsorConfidence {
+    if (matches.some(m => m.confidenceTier === 'CONFIRMED')) return 'CONFIRMED'
+    if (matches.some(m => m.confidenceTier === 'LIKELY')) return 'LIKELY'
+    if (matches.some(m => m.confidenceTier === 'LOW_CONFIDENCE')) return 'LOW_CONFIDENCE'
+    return 'UNKNOWN'
+  }
+
+  const mappedJobs = jobs.map(job => ({
+    ...job,
+    sponsorConfidence: getBestConfidence(job.sponsorMatches),
+    sponsorMatchReason: job.sponsorMatches[0]?.matchReason ?? undefined,
+  }))
+
   return NextResponse.json({
-    jobs,
+    jobs: mappedJobs,
     total,
     page,
     totalPages: Math.ceil(total / limit),

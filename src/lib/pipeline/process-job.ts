@@ -133,6 +133,9 @@ export interface ProcessedJob {
   subDomains: SubDomain[]
   salaryMatch: SalaryMatchResult
 
+  /** Normalised location enum, derived from the raw location string */
+  locationNormalised: 'LONDON' | 'REMOTE' | 'HYBRID' | 'UK_OTHER' | 'UNKNOWN'
+
   /**
    * Composite eligibility score (0–100).
    * Calculated from the individual scorer outputs; higher = better match.
@@ -219,6 +222,42 @@ function calculateFeedVisible(
 }
 
 // ---------------------------------------------------------------------------
+// Location normalisation
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a raw location string into a canonical LocationType enum value.
+ * Used to populate the DB `locationNormalised` column so filters work correctly.
+ */
+function normaliseLocation(raw: string): 'LONDON' | 'REMOTE' | 'HYBRID' | 'UK_OTHER' | 'UNKNOWN' {
+  const l = raw.toLowerCase()
+  if (l.includes('london')) return 'LONDON'
+  if (l.includes('remote')) return 'REMOTE'
+  if (l.includes('hybrid')) return 'HYBRID'
+  if (
+    l.includes('uk') ||
+    l.includes('united kingdom') ||
+    l.includes('england') ||
+    l.includes('manchester') ||
+    l.includes('birmingham') ||
+    l.includes('edinburgh') ||
+    l.includes('bristol') ||
+    l.includes('leeds') ||
+    l.includes('glasgow') ||
+    l.includes('sheffield') ||
+    l.includes('liverpool') ||
+    l.includes('cambridge') ||
+    l.includes('oxford') ||
+    l.includes('reading') ||
+    l.includes('guildford') ||
+    l.includes('cheltenham') ||
+    l.includes('cardiff') ||
+    l.includes('belfast')
+  ) return 'UK_OTHER'
+  return 'UNKNOWN'
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline entry point
 // ---------------------------------------------------------------------------
 
@@ -274,6 +313,9 @@ export async function processRawJob(
   const { normaliseCompanyName } = await import('@/lib/matching/sponsor-matcher')
   const companyNameNormalised = normaliseCompanyName(raw.companyName)
 
+  // 6. Normalise location
+  const locationNormalised = normaliseLocation(raw.location)
+
   return {
     // Identity
     externalId: raw.externalId,
@@ -286,6 +328,7 @@ export async function processRawJob(
     companyNameNormalised,
     description: raw.description,
     location: raw.location,
+    locationNormalised,
     postedAt: raw.postedAt,
     listingUrl: raw.listingUrl,
 
