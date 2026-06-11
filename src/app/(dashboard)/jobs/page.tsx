@@ -24,6 +24,7 @@ interface Filters {
   domain: DomainFilter;
   sponsorship: SponsorFilter;
   excludeSC: boolean;
+  searchQuery: string;
   postedWithin: AgeFilter;
 }
 
@@ -95,6 +96,7 @@ async function fetchJobs(filters: Filters, page: number): Promise<JobsApiRespons
   if (filters.domain !== "ALL") params.set("subDomain", filters.domain);
   if (filters.sponsorship !== "ALL") params.set("sponsorConfidence", filters.sponsorship);
   if (filters.excludeSC) params.set("excludeSC", "true");
+  if (filters.searchQuery) params.set("q", filters.searchQuery);
   if (filters.postedWithin !== "ALL") params.set("postedWithin", filters.postedWithin);
   params.set("page", String(page));
   params.set("limit", String(PAGE_SIZE));
@@ -151,6 +153,7 @@ function JobCard({ job }: { job: Job }) {
   const [applying, setApplying] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [applied, setApplied] = React.useState(false);
+  const [noUrlNotice, setNoUrlNotice] = React.useState(false);
 
   async function handleSave(e: React.MouseEvent) {
     e.preventDefault();
@@ -171,6 +174,12 @@ function JobCard({ job }: { job: Job }) {
     try {
       await postApplication(job.id, "APPLIED");
       setApplied(true);
+      if (job.sourceUrl) {
+        window.open(job.sourceUrl, "_blank", "noopener,noreferrer");
+      } else {
+        setNoUrlNotice(true);
+        setTimeout(() => setNoUrlNotice(false), 4000);
+      }
     } catch {
       // silently fail — offline/mock mode
     } finally {
@@ -234,6 +243,9 @@ function JobCard({ job }: { job: Job }) {
           {applied ? "Applied ✓" : applying ? "Applying…" : "Apply"}
         </Button>
       </div>
+      {noUrlNotice && (
+        <p className="text-xs text-slate-500 text-center">No direct link available</p>
+      )}
     </article>
   );
 }
@@ -264,15 +276,18 @@ function SkeletonCard() {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function JobsPage() {
+  const [searchQuery, setSearchQuery] = React.useState("");
   const [filters, setFilters] = React.useState<Filters>({
     location: "ALL",
     seniority: "ALL",
     domain: "ALL",
     sponsorship: "ALL",
     excludeSC: true,
+    searchQuery: "",
     postedWithin: "ALL",
   });
   const [page, setPage] = React.useState(1);
+  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [jobs, setJobs] = React.useState<Job[]>([]);
   const [total, setTotal] = React.useState(0);
   const [totalPages, setTotalPages] = React.useState(1);
@@ -307,6 +322,24 @@ export default function JobsPage() {
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(1);
+  }
+
+  function triggerSearch(q: string) {
+    setFilters((prev) => ({ ...prev, searchQuery: q }));
+    setPage(1);
+  }
+
+  function handleSearchInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const q = e.target.value;
+    setSearchQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => triggerSearch(q), 500);
+  }
+
+  function clearSearch() {
+    setSearchQuery("");
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    triggerSearch("");
   }
 
   async function handleSearch() {
@@ -386,6 +419,34 @@ export default function JobsPage() {
 
       {/* Filters */}
       <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
+        {/* Keyword search */}
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={handleSearchInput}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (debounceRef.current) clearTimeout(debounceRef.current);
+                triggerSearch(searchQuery);
+              }
+            }}
+            placeholder="Search jobs… e.g. pentest london"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Search jobs by keyword"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={clearSearch}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              ×
+            </button>
+          )}
+        </div>
+
         {/* Location */}
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Location</span>
@@ -479,12 +540,15 @@ export default function JobsPage() {
             size="sm"
             className="mt-4"
             onClick={() => {
+              setSearchQuery("");
+              if (debounceRef.current) clearTimeout(debounceRef.current);
               setFilters({
                 location: "ALL",
                 seniority: "ALL",
                 domain: "ALL",
                 sponsorship: "ALL",
                 excludeSC: true,
+                searchQuery: "",
                 postedWithin: "ALL",
               });
               setPage(1);
