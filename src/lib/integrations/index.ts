@@ -6,7 +6,7 @@
  * internal file structure changes.
  *
  * Usage examples:
- *   import { fetchAdzunaJobs, fetchReedJobs, fetchJoobleJobs } from '@/lib/integrations';
+ *   import { fetchAdzunaJobs, fetchReedJobs } from '@/lib/integrations';
  *   import { computeJobHash } from '@/lib/integrations';
  *   import { downloadSponsorRegisterCSV, parseSponsorCSV, normaliseSponsorName } from '@/lib/integrations';
  *   import { RawJobListing, RateLimitError, AdapterError } from '@/lib/integrations';
@@ -19,13 +19,11 @@ export { RateLimitError, AdapterError } from './types';
 // Job-source adapters
 export { fetchAdzunaJobs } from './adzuna';
 export { fetchReedJobs } from './reed';
-export { fetchJoobleJobs } from './jooble';
 export { fetchRemoteOKJobs } from './remoteok';
 export { fetchJSearchJobs } from './jsearch';
 export { fetchActiveJobs } from './activejobs';
 export { fetchGlassdoorJobs } from './glassdoor';
 export { fetchIndeedJobs } from './indeed';
-export { fetchMonsterJobs } from './monster';
 export { fetchRemootejobs } from './remoote';
 
 // gov.uk sponsor register worker
