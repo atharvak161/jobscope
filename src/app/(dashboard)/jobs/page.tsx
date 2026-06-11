@@ -264,6 +264,8 @@ export default function JobsPage() {
   const [total, setTotal] = React.useState(0);
   const [totalPages, setTotalPages] = React.useState(1);
   const [loading, setLoading] = React.useState(true);
+  const [searching, setSearching] = React.useState(false);
+  const [searchMsg, setSearchMsg] = React.useState<string | null>(null);
 
   const load = React.useCallback(
     async (f: Filters, p: number) => {
@@ -294,13 +296,80 @@ export default function JobsPage() {
     setPage(1);
   }
 
+  async function handleSearch() {
+    setSearching(true);
+    setSearchMsg(null);
+    try {
+      const res = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "cybersecurity", location: "uk" }),
+      });
+      const data = await res.json() as { ok: boolean; result?: { ingested: number; skipped: number; errors: number } };
+      if (data.ok && data.result) {
+        setSearchMsg(`Found ${data.result.ingested} new jobs (${data.result.skipped} already seen)`);
+      } else {
+        setSearchMsg("Search complete");
+      }
+      // Reload feed with fresh results
+      await load(filters, 1);
+      setPage(1);
+    } catch {
+      setSearchMsg("Search failed — check console");
+    } finally {
+      setSearching(false);
+      setTimeout(() => setSearchMsg(null), 5000);
+    }
+  }
+
   const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const to = Math.min(page * PAGE_SIZE, total);
 
   return (
     <div className="p-6 space-y-5">
-      {/* Page heading */}
-      <h1 className="text-xl font-semibold text-slate-900">Job Feed</h1>
+      {/* Page heading + Search Jobs button */}
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold text-slate-900">Job Feed</h1>
+        <div className="flex items-center gap-3">
+          {searchMsg && (
+            <span className="text-xs text-slate-500">{searchMsg}</span>
+          )}
+          <Button
+            onClick={handleSearch}
+            disabled={searching}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 h-auto"
+          >
+            {searching ? (
+              <span className="flex items-center gap-1.5">
+                <svg
+                  className="animate-spin h-3.5 w-3.5"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8H4z"
+                  />
+                </svg>
+                Searching…
+              </span>
+            ) : (
+              "Search Jobs"
+            )}
+          </Button>
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">

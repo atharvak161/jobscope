@@ -23,10 +23,10 @@ export { fetchJoobleJobs } from './jooble';
 export { fetchRemoteOKJobs } from './remoteok';
 export { fetchJSearchJobs } from './jsearch';
 export { fetchActiveJobs } from './activejobs';
+export { fetchGlassdoorJobs } from './glassdoor';
 export { fetchIndeedJobs } from './indeed';
 export { fetchMonsterJobs } from './monster';
 export { fetchRemootejobs } from './remoote';
-export { fetchGlassdoorJobs } from './glassdoor';
 
 // gov.uk sponsor register worker
 export {
