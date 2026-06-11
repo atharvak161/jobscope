@@ -16,6 +16,7 @@ type LocationFilter = "ALL" | LocationType;
 type SeniorityFilter = "ALL" | Seniority;
 type DomainFilter = "ALL" | string;
 type SponsorFilter = "ALL" | SponsorConfidence;
+type AgeFilter = "ALL" | "7" | "14" | "30";
 
 interface Filters {
   location: LocationFilter;
@@ -23,6 +24,7 @@ interface Filters {
   domain: DomainFilter;
   sponsorship: SponsorFilter;
   excludeSC: boolean;
+  postedWithin: AgeFilter;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -60,6 +62,13 @@ const SPONSOR_OPTIONS: { label: string; value: SponsorFilter }[] = [
   { label: "Likely", value: "LIKELY" },
 ];
 
+const AGE_OPTIONS: { label: string; value: AgeFilter }[] = [
+  { label: "Any time", value: "ALL" },
+  { label: "Last 7 days", value: "7" },
+  { label: "Last 14 days", value: "14" },
+  { label: "Last 30 days", value: "30" },
+];
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function formatDaysAgo(dateStr?: string): string {
@@ -86,6 +95,7 @@ async function fetchJobs(filters: Filters, page: number): Promise<JobsApiRespons
   if (filters.domain !== "ALL") params.set("subDomain", filters.domain);
   if (filters.sponsorship !== "ALL") params.set("sponsorConfidence", filters.sponsorship);
   if (filters.excludeSC) params.set("excludeSC", "true");
+  if (filters.postedWithin !== "ALL") params.set("postedWithin", filters.postedWithin);
   params.set("page", String(page));
   params.set("limit", String(PAGE_SIZE));
 
@@ -260,6 +270,7 @@ export default function JobsPage() {
     domain: "ALL",
     sponsorship: "ALL",
     excludeSC: true,
+    postedWithin: "ALL",
   });
   const [page, setPage] = React.useState(1);
   const [jobs, setJobs] = React.useState<Job[]>([]);
@@ -430,6 +441,16 @@ export default function JobsPage() {
             Hide SC-required roles
           </label>
         </div>
+
+        {/* Posted age filter */}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-medium text-slate-500 w-20 shrink-0">Posted</span>
+          <FilterChipGroup
+            options={AGE_OPTIONS}
+            value={filters.postedWithin}
+            onChange={(v) => updateFilter("postedWithin", v)}
+          />
+        </div>
       </div>
 
       {/* Results header */}
@@ -464,6 +485,7 @@ export default function JobsPage() {
                 domain: "ALL",
                 sponsorship: "ALL",
                 excludeSC: true,
+                postedWithin: "ALL",
               });
               setPage(1);
             }}
