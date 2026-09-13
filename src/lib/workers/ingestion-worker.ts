@@ -300,7 +300,8 @@ export async function writeProcessedJob(
 
 // ---------------------------------------------------------------------------
 // runIngestionCycle
-// Top-level entry point: calls all three adapters and processes every listing.
+// Top-level entry point: calls every configured job-source adapter and
+// processes every listing they return.
 // ---------------------------------------------------------------------------
 
 export async function runIngestionCycle(
@@ -311,10 +312,35 @@ export async function runIngestionCycle(
   let skipped = 0
   let errors = 0
 
-  // ── 1. Collect listings from all three adapters ───────────────────────────
+  // ── 1. Collect listings from every configured adapter ──────────────────────
   // Adapter failures are isolated: one failing source doesn't block the others.
 
   const allListings: IntegrationRawJobListing[] = []
+
+  // Multi-query term sets for the adapters that fan out across several
+  // searches per cycle (each call spends one unit of that source's quota).
+  const jsearchQueries = [
+    'cybersecurity uk',
+    'penetration testing uk',
+    'information security uk',
+    'SOC analyst uk',
+    'cloud security uk',
+  ]
+  const activeJobsQueries = [
+    '"cybersecurity" OR "cyber security"',
+    '"penetration testing" OR "pentester"',
+    '"information security" OR "infosec"',
+    '"SOC analyst" OR "security analyst"',
+    '"cloud security" OR "security engineer"',
+  ]
+  const indeedQueries = [
+    'cybersecurity uk',
+    'penetration testing uk',
+    'information security uk',
+    'SOC analyst uk',
+    'security engineer uk',
+  ]
+  const remooteQueries = ['cybersecurity', 'penetration testing', 'information security', 'SOC analyst', 'security engineer']
 
   // Keyed adapters only run when their required env vars are configured.
   // A missing key is not an error — the source is simply skipped so the app
@@ -340,11 +366,73 @@ export async function runIngestionCycle(
       enabled: true,
       fn: () => fetchRemoteOKJobs(50),
     },
+    // JSearch: multi-query pass (Google Jobs aggregator via RapidAPI).
+    // Each query fetches page 1 only (conserve free tier quota: 200 req/month).
+    {
+      name: 'jsearch',
+      enabled: Boolean(process.env.JSEARCH_API_KEY),
+      fn: async () => {
+        const listings: IntegrationRawJobListing[] = []
+        for (const jsearchQuery of jsearchQueries) {
+          try {
+            listings.push(...(await fetchJSearchJobs(jsearchQuery, 1)))
+          } catch (err) {
+            console.warn(`[ingestion-worker] jsearch query "${jsearchQuery}" failed:`, err)
+            errors++
+          }
+        }
+        return listings
+      },
+    },
+    // Active Jobs DB: multi-query pass (ATS aggregator via RapidAPI).
+    // Real ATS postings from Greenhouse, Lever, Workday, etc. — last 24 hours.
+    // 1 call per query term; offset fixed at 0 (free tier: ~100 req/month).
+    {
+      name: 'activejobs',
+      enabled: Boolean(process.env.RAPIDAPI_KEY),
+      fn: async () => {
+        const listings: IntegrationRawJobListing[] = []
+        for (const activeQuery of activeJobsQueries) {
+          try {
+            listings.push(...(await fetchActiveJobs(activeQuery)))
+          } catch (err) {
+            console.warn(`[ingestion-worker] activejobs query "${activeQuery}" failed:`, err)
+            errors++
+          }
+        }
+        return listings
+      },
+    },
+    // Indeed (RapidAPI scraper). Quota-guarded: if the monthly quota is hit
+    // (HTTP 402/403/429) the remaining queries for this source are skipped.
+    {
+      name: 'indeed',
+      enabled: Boolean(process.env.RAPIDAPI_KEY),
+      fn: async () => {
+        const { listings, errors: indeedErrors } = await runQueriesWithQuotaGuard(
+          'indeed', indeedQueries, fetchIndeedJobs,
+        )
+        errors += indeedErrors
+        return listings
+      },
+    },
+    // Remoote (RapidAPI scraper). Same quota-guard treatment as Indeed.
+    {
+      name: 'remoote',
+      enabled: Boolean(process.env.RAPIDAPI_KEY),
+      fn: async () => {
+        const { listings, errors: remooteErrors } = await runQueriesWithQuotaGuard(
+          'remoote', remooteQueries, fetchRemootejobs,
+        )
+        errors += remooteErrors
+        return listings
+      },
+    },
   ]
 
   for (const adapter of adapterRuns) {
     if (!adapter.enabled) {
-      console.log(`[ingestion-worker] ${adapter.name}: no API keys configured, skipping`)
+      console.log(`[ingestion-worker] ${adapter.name}: no API key(s) configured, skipping`)
       continue
     }
     try {
@@ -354,85 +442,6 @@ export async function runIngestionCycle(
       console.warn(`[ingestion-worker] ${adapter.name} adapter failed:`, err)
       errors++
     }
-  }
-
-  // ── JSearch: multi-query pass (Google Jobs aggregator via RapidAPI) ────────
-  // Each query fetches page 1 only (conserve free tier quota: 200 req/month).
-  // Skipped gracefully when JSEARCH_API_KEY is not set.
-  const jsearchEnabled = Boolean(process.env.JSEARCH_API_KEY)
-  if (!jsearchEnabled) {
-    console.log('[ingestion-worker] jsearch: no API key configured, skipping')
-  } else {
-    const jsearchQueries = [
-      'cybersecurity uk',
-      'penetration testing uk',
-      'information security uk',
-      'SOC analyst uk',
-      'cloud security uk',
-    ]
-    for (const jsearchQuery of jsearchQueries) {
-      try {
-        const listings = await fetchJSearchJobs(jsearchQuery, 1)
-        allListings.push(...listings)
-      } catch (err) {
-        console.warn(`[ingestion-worker] jsearch query "${jsearchQuery}" failed:`, err)
-        errors++
-      }
-    }
-  }
-
-  // ── Active Jobs DB: multi-query pass (ATS aggregator via RapidAPI) ─────────
-  // Real ATS postings from Greenhouse, Lever, Workday, etc. — last 24 hours.
-  // 1 call per query term; offset fixed at 0 (free tier: ~100 req/month).
-  // fetchActiveJobs returns [] silently when RAPIDAPI_KEY is not set.
-  const activeJobsQueries = [
-    '"cybersecurity" OR "cyber security"',
-    '"penetration testing" OR "pentester"',
-    '"information security" OR "infosec"',
-    '"SOC analyst" OR "security analyst"',
-    '"cloud security" OR "security engineer"',
-  ]
-  for (const activeQuery of activeJobsQueries) {
-    try {
-      const listings = await fetchActiveJobs(activeQuery)
-      if (listings.length === 0 && !process.env.RAPIDAPI_KEY) {
-        // Key not set — log once on first iteration and break
-        console.log('[ingestion-worker] activejobs: no RAPIDAPI_KEY configured, skipping')
-        break
-      }
-      allListings.push(...listings)
-    } catch (err) {
-      console.warn(`[ingestion-worker] activejobs query "${activeQuery}" failed:`, err)
-      errors++
-    }
-  }
-
-  // ── RapidAPI scrapers: Indeed, Remoote ───────────────────────────────────
-  // Each source runs independently. If one hits its monthly quota limit
-  // (HTTP 402/403/429) it stops immediately and the others keep running.
-  if (!process.env.RAPIDAPI_KEY) {
-    console.log('[ingestion-worker] RAPIDAPI_KEY not set — skipping Indeed, Remoote')
-  } else {
-    const scraperQueries = [
-      'cybersecurity uk',
-      'penetration testing uk',
-      'information security uk',
-      'SOC analyst uk',
-      'security engineer uk',
-    ]
-
-    const { listings: indeedListings, errors: indeedErrors } = await runQueriesWithQuotaGuard(
-      'indeed', scraperQueries, fetchIndeedJobs,
-    )
-    allListings.push(...indeedListings)
-    errors += indeedErrors
-
-    const remooteQueries = ['cybersecurity', 'penetration testing', 'information security', 'SOC analyst', 'security engineer']
-    const { listings: remooteListings, errors: remooteErrors } = await runQueriesWithQuotaGuard(
-      'remoote', remooteQueries, fetchRemootejobs,
-    )
-    allListings.push(...remooteListings)
-    errors += remooteErrors
   }
 
   // ── 2. Process each listing ────────────────────────────────────────────────
