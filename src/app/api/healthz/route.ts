@@ -9,8 +9,22 @@ export async function GET() {
     // Check DB connectivity
     await prisma.$queryRaw`SELECT 1`
 
-    // Check job source freshness (25h threshold per SLO)
-    const sources = ['ADZUNA', 'REED', 'JOOBLE', 'REMOTEOK', 'JSEARCH']
+    // Check job source freshness (25h threshold per SLO).
+    // Only sources the ingestion worker can actually produce rows for belong
+    // here — JOOBLE's adapter was removed in #33, so it can never be fresh
+    // and would permanently trip this into 'degraded'. Key-gated sources are
+    // only checked when their key is configured; otherwise they're legitimately
+    // never ingested (by design — the app must run with zero API keys) and
+    // including them would cause the same false-degraded failure JOOBLE did.
+    // Keep this enablement logic in sync with `adapterRuns` in
+    // src/lib/workers/ingestion-worker.ts.
+    const sources = [
+      'ADZUNA',
+      'REED',
+      'REMOTEOK',
+      ...(process.env.JSEARCH_API_KEY ? ['JSEARCH'] : []),
+      ...(process.env.RAPIDAPI_KEY ? ['ACTIVEJOBS', 'INDEED', 'REMOOTE'] : []),
+    ]
     const freshnessChecks = await Promise.all(
       sources.map(async (source) => {
         const latest = await prisma.rawJobIngestion.findFirst({
