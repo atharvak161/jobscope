@@ -15,7 +15,7 @@ JobScope aggregates UK tech jobs from multiple job boards, then applies the two 
 
 ## Features
 
-- **Multi-source job aggregation** — Adzuna, Reed, Jooble, and RemoteOK. Works with zero API keys out of the box via RemoteOK.
+- **Multi-source job aggregation** — Adzuna, Reed, and RemoteOK. Works with zero API keys out of the box via RemoteOK.
 - **Visa sponsor filter** — every employer matched against the official gov.uk Register of Licensed Sponsors (exact + fuzzy `pg_trgm` matching), tiered CONFIRMED / LIKELY / LOW_CONFIDENCE / UNKNOWN.
 - **Security clearance detection** — SC/DV/CTC-required roles are automatically detected from the job text, flagged, and filterable (hidden by default).
 - **Resume parsing** — upload your CV (PDF or DOCX), Claude extracts skills, certifications, and experience, then scores role fit.
@@ -50,9 +50,16 @@ The app starts with RemoteOK jobs, which need no API key. Add the other keys bel
 | RemoteOK | None | — | Unlimited | Remote tech jobs (default, always on) |
 | Adzuna | `ADZUNA_APP_ID` + `ADZUNA_API_KEY` | [developer.adzuna.com](https://developer.adzuna.com) | 250 req/day | UK tech jobs |
 | Reed | `REED_API_KEY` | [reed.co.uk/developers](https://www.reed.co.uk/developers) | 1,000 req/day | UK jobs |
-| Jooble | `JOOBLE_API_KEY` | [jooble.org/api](https://jooble.org/api/about) | Generous free tier | Aggregated jobs |
 | Anthropic | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) | Pay per use | Resume parsing (CV upload) |
 | Cloudflare R2 | `CLOUDFLARE_R2_ACCOUNT_ID` + `R2_BUCKET` + `R2_ACCESS_KEY` + `R2_SECRET_KEY` | [dash.cloudflare.com](https://dash.cloudflare.com) | 10GB free | Resume file storage (optional) |
+
+### Adapters present but not yet wired
+
+`src/lib/integrations/` also contains `jsearch.ts`, `activejobs.ts`, `indeed.ts`
+and `remoote.ts`, and `.env.example` documents their keys. The ingestion worker
+on `main` runs only Adzuna, Reed and RemoteOK — the remaining four are not in
+its adapter list yet, so setting their keys has no effect today. Wiring lands
+with the open integration branches.
 
 ## Environment Variables
 
@@ -66,7 +73,10 @@ Every variable from `.env.example`:
 | `ADZUNA_APP_ID` | Optional | Adzuna application ID. |
 | `ADZUNA_API_KEY` | Optional | Adzuna API key. |
 | `REED_API_KEY` | Optional | Reed Jobseeker API key. |
-| `JOOBLE_API_KEY` | Optional | Jooble API key. |
+| `INGEST_SECRET` | Yes | Shared secret protecting `POST /api/ingest`. Change before production. |
+| `NEXT_PUBLIC_APP_URL` | Optional | Base URL for server-side fetches to internal API routes. Falls back to relative paths. |
+| `JSEARCH_API_KEY` | Optional | RapidAPI key for JSearch. Adapter present but not yet wired into the ingestion worker. |
+| `RAPIDAPI_KEY` | Optional | RapidAPI key shared by the Active Jobs DB, Indeed and Remoote adapters. Present but not yet wired in. |
 | `ANTHROPIC_API_KEY` | Optional | Claude API key. Required for resume parsing; the feature is disabled without it. |
 | `CLOUDFLARE_R2_ACCOUNT_ID` | Optional | Cloudflare R2 account ID for resume storage. |
 | `R2_BUCKET` | Optional | R2 bucket name. |
